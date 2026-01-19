@@ -1,0 +1,6 @@
+{"kind":"task","id":"claim-cmd","title":"Add claim/unclaim for agent coordination","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","agents"]}
+{"kind":"task","id":"formal-verify","title":"Add LoLA/PAT export for formal verification","status":"open","estimate":{"hours":16.0,"cost":1600.0},"blocked_by":["plan-cmd"],"tags":["verification","advanced"]}
+{"kind":"task","id":"wg-skill","title":"Create Claude Code skill for workgraph","status":"done","estimate":{"hours":2.0,"cost":200.0},"tags":["meta","skill"]}
+{"kind":"task","id":"plan-cmd","title":"Add plan command (wg plan --budget X)","status":"open","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["actor-cmd","resource-cmd"],"tags":["cli","planning"]}
+{"kind":"task","id":"actor-cmd","title":"Add actor command (wg actor add/list)","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
+{"kind":"task","id":"resource-cmd","title":"Add resource command (wg resource add/list)","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
