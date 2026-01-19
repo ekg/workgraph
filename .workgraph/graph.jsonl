@@ -4,3 +4,4 @@
 {"kind":"task","id":"plan-cmd","title":"Add plan command (wg plan --budget X)","status":"open","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["actor-cmd","resource-cmd"],"tags":["cli","planning"]}
 {"kind":"task","id":"actor-cmd","title":"Add actor command (wg actor add/list)","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
 {"kind":"task","id":"resource-cmd","title":"Add resource command (wg resource add/list)","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
+{"kind":"task","id":"agent-coordinator","title":"Implement agent coordinator (dispatch parallel agents to ready tasks)","status":"open","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["claim-cmd"],"tags":["agents","core"]}
