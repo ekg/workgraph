@@ -40,6 +40,9 @@ pub struct Task {
     pub requires: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Task is not ready until this timestamp (ISO 8601 / RFC 3339)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not_before: Option<String>,
 }
 
 /// An actor (human or agent)
@@ -208,6 +211,7 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            not_before: None,
         }
     }
 

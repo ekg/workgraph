@@ -124,6 +124,20 @@ enum Commands {
         hours: Option<f64>,
     },
 
+    /// Reschedule a task (set not_before timestamp)
+    Reschedule {
+        /// Task ID
+        id: String,
+
+        /// Hours from now until task is ready (e.g., 24 for tomorrow)
+        #[arg(long)]
+        after: Option<f64>,
+
+        /// Specific timestamp when task becomes ready (ISO 8601)
+        #[arg(long)]
+        at: Option<String>,
+    },
+
     /// Manage resources
     Resource {
         #[command(subcommand)]
@@ -232,6 +246,9 @@ fn main() -> Result<()> {
         }
         Commands::Plan { budget, hours } => {
             commands::plan::run(&workgraph_dir, budget, hours, cli.json)
+        }
+        Commands::Reschedule { id, after, at } => {
+            commands::reschedule::run(&workgraph_dir, &id, after, at.as_deref())
         }
         Commands::Resource { command } => match command {
             ResourceCommands::Add {
