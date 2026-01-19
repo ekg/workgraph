@@ -205,6 +205,9 @@ mod tests {
             requires: vec![],
             tags: vec![],
             not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
         }
     }
 
@@ -220,6 +223,9 @@ mod tests {
             requires: vec![],
             tags: tags.into_iter().map(String::from).collect(),
             not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
         }
     }
 

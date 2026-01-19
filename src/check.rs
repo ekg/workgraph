@@ -150,6 +150,9 @@ mod tests {
             requires: vec![],
             tags: vec![],
             not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
         }
     }
 

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -54,6 +55,9 @@ pub fn run(
         requires: vec![],
         tags: tags.to_vec(),
         not_before: None,
+        created_at: Some(Utc::now().to_rfc3339()),
+        started_at: None,
+        completed_at: None,
     };
 
     // Append to file

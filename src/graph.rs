@@ -43,6 +43,15 @@ pub struct Task {
     /// Task is not ready until this timestamp (ISO 8601 / RFC 3339)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_before: Option<String>,
+    /// Timestamp when the task was created (ISO 8601 / RFC 3339)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// Timestamp when the task status changed to InProgress (ISO 8601 / RFC 3339)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    /// Timestamp when the task status changed to Done (ISO 8601 / RFC 3339)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 }
 
 /// An actor (human or agent)
@@ -212,6 +221,9 @@ mod tests {
             requires: vec![],
             tags: vec![],
             not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
         }
     }
 
@@ -329,5 +341,40 @@ mod tests {
             serde_json::to_string(&Status::InProgress).unwrap(),
             "\"in-progress\""
         );
+    }
+
+    #[test]
+    fn test_timestamp_fields_serialization() {
+        let mut task = make_task("t1", "Test task");
+        task.created_at = Some("2024-01-15T10:30:00Z".to_string());
+        task.started_at = Some("2024-01-15T11:00:00Z".to_string());
+        task.completed_at = Some("2024-01-15T12:00:00Z".to_string());
+
+        let json = serde_json::to_string(&Node::Task(task)).unwrap();
+        assert!(json.contains("\"created_at\":\"2024-01-15T10:30:00Z\""));
+        assert!(json.contains("\"started_at\":\"2024-01-15T11:00:00Z\""));
+        assert!(json.contains("\"completed_at\":\"2024-01-15T12:00:00Z\""));
+
+        // Verify deserialization
+        let node: Node = serde_json::from_str(&json).unwrap();
+        match node {
+            Node::Task(t) => {
+                assert_eq!(t.created_at, Some("2024-01-15T10:30:00Z".to_string()));
+                assert_eq!(t.started_at, Some("2024-01-15T11:00:00Z".to_string()));
+                assert_eq!(t.completed_at, Some("2024-01-15T12:00:00Z".to_string()));
+            }
+            _ => panic!("Expected Task"),
+        }
+    }
+
+    #[test]
+    fn test_timestamp_fields_omitted_when_none() {
+        let task = make_task("t1", "Test task");
+        let json = serde_json::to_string(&Node::Task(task)).unwrap();
+
+        // Verify timestamps are not included when None
+        assert!(!json.contains("created_at"));
+        assert!(!json.contains("started_at"));
+        assert!(!json.contains("completed_at"));
     }
 }

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::path::Path;
 use workgraph::graph::Status;
 use workgraph::parser::{load_graph, save_graph};
@@ -24,6 +25,7 @@ pub fn run(dir: &Path, id: &str) -> Result<()> {
     }
 
     task.status = Status::Done;
+    task.completed_at = Some(Utc::now().to_rfc3339());
 
     save_graph(&graph, &path).context("Failed to save graph")?;
 
