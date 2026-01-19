@@ -1,13 +1,13 @@
-{"kind":"task","id":"wg-skill","title":"Create Claude Code skill for workgraph","status":"done","estimate":{"hours":2.0,"cost":200.0},"tags":["meta","skill"]}
-{"kind":"resource","id":"budget-q1","name":"Q1 Budget","type":"money","available":50000.0,"unit":"usd"}
-{"kind":"actor","id":"erik","name":"Erik","role":"engineer"}
-{"kind":"task","id":"resource-cmd","title":"Add resource command (wg resource add/list)","status":"done","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
+{"kind":"task","id":"bottlenecks-cmd","title":"Implement wg bottlenecks command (tasks blocking most work)","status":"done","assigned":"agent-5","estimate":{"hours":3.0,"cost":300.0},"blocked_by":["impact-cmd"],"tags":["cli","analysis"]}
+{"kind":"task","id":"cycle-design","title":"Design cycle/loop task semantics for long-running agent work","status":"done","estimate":{"hours":4.0,"cost":400.0},"tags":["design","core"]}
+{"kind":"task","id":"structure-cmd","title":"Implement wg structure command (entry points, dead ends, roots)","status":"done","assigned":"agent-3","estimate":{"hours":3.0,"cost":300.0},"tags":["cli","analysis"]}
+{"kind":"task","id":"why-blocked-cmd","title":"Implement wg why-blocked command (transitive blocker chain)","status":"done","assigned":"agent-1","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","analysis"]}
 {"kind":"task","id":"actor-cmd","title":"Add actor command (wg actor add/list)","status":"done","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
-{"kind":"task","id":"agent-coordinator","title":"Implement agent coordinator (dispatch parallel agents to ready tasks)","status":"done","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["claim-cmd"],"tags":["agents","core"]}
-{"kind":"resource","id":"gpu-cluster","name":"GPU Cluster","type":"compute","available":100.0,"unit":"gpu-hours"}
-{"kind":"task","id":"plan-cmd","title":"Add plan command (wg plan --budget X)","status":"done","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["actor-cmd","resource-cmd"],"tags":["cli","planning"]}
-{"kind":"task","id":"formal-verify","title":"Add LoLA/PAT export for formal verification","status":"open","estimate":{"hours":16.0,"cost":1600.0},"blocked_by":["plan-cmd"],"tags":["verification","advanced"]}
 {"kind":"task","id":"claim-cmd","title":"Add claim/unclaim for agent coordination","status":"done","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","agents"]}
-{"kind":"task","id":"daily-release","title":"Daily release check","status":"open"}
-{"kind":"task","id":"cycle-design","title":"Design cycle/loop task semantics for long-running agent work","status":"open","estimate":{"hours":4.0,"cost":400.0},"tags":["design","core"]}
-{"kind":"actor","id":"alice","name":"Alice","role":"pm","rate":200.0,"capacity":30.0}
+{"kind":"task","id":"agent-coordinator","title":"Implement agent coordinator (dispatch parallel agents to ready tasks)","status":"done","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["claim-cmd"],"tags":["agents","core"]}
+{"kind":"task","id":"impact-cmd","title":"Implement wg impact command (forward dependency analysis)","status":"done","assigned":"agent-2","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","analysis"]}
+{"kind":"task","id":"wg-skill","title":"Create Claude Code skill for workgraph","status":"done","estimate":{"hours":2.0,"cost":200.0},"tags":["meta","skill"]}
+{"kind":"task","id":"wg-analysis","title":"Design and implement workgraph analysis commands","status":"open","estimate":{"hours":16.0,"cost":1600.0},"blocked_by":["plan-cmd"],"tags":["verification","advanced"]}
+{"kind":"task","id":"plan-cmd","title":"Add plan command (wg plan --budget X)","status":"done","estimate":{"hours":8.0,"cost":800.0},"blocked_by":["actor-cmd","resource-cmd"],"tags":["cli","planning"]}
+{"kind":"task","id":"resource-cmd","title":"Add resource command (wg resource add/list)","status":"done","estimate":{"hours":4.0,"cost":400.0},"tags":["cli","core"]}
+{"kind":"task","id":"loops-classify-cmd","title":"Enhance wg loops command with cycle classification","status":"done","assigned":"agent-4","estimate":{"hours":2.0,"cost":200.0},"tags":["cli","analysis"]}
