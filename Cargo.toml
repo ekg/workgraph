@@ -1,0 +1,17 @@
+[package]
+name = "workgraph"
+version = "0.1.0"
+edition = "2024"
+description = "A lightweight work coordination graph with formal verification"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+petgraph = "0.6"
+thiserror = "2.0"
+anyhow = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"

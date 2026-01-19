@@ -1,0 +1,329 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Cost/time estimate for a task
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Estimate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hours: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+}
+
+/// Task status
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Status {
+    #[default]
+    Open,
+    InProgress,
+    Done,
+    Blocked,
+}
+
+/// A task node
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Task {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub status: Status,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<Estimate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// An actor (human or agent)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Actor {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<f64>,
+}
+
+/// A resource (budget, compute, etc.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Resource {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub resource_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+}
+
+/// Node kind discriminator
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeKind {
+    Task,
+    Actor,
+    Resource,
+}
+
+/// A node in the work graph (task, actor, or resource)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Node {
+    Task(Task),
+    Actor(Actor),
+    Resource(Resource),
+}
+
+impl Node {
+    pub fn id(&self) -> &str {
+        match self {
+            Node::Task(t) => &t.id,
+            Node::Actor(a) => &a.id,
+            Node::Resource(r) => &r.id,
+        }
+    }
+
+    pub fn kind(&self) -> NodeKind {
+        match self {
+            Node::Task(_) => NodeKind::Task,
+            Node::Actor(_) => NodeKind::Actor,
+            Node::Resource(_) => NodeKind::Resource,
+        }
+    }
+}
+
+/// The work graph: a collection of nodes with embedded edges
+#[derive(Debug, Clone, Default)]
+pub struct WorkGraph {
+    nodes: HashMap<String, Node>,
+}
+
+impl WorkGraph {
+    pub fn new() -> Self {
+        Self {
+            nodes: HashMap::new(),
+        }
+    }
+
+    pub fn add_node(&mut self, node: Node) {
+        self.nodes.insert(node.id().to_string(), node);
+    }
+
+    pub fn get_node(&self, id: &str) -> Option<&Node> {
+        self.nodes.get(id)
+    }
+
+    pub fn get_task(&self, id: &str) -> Option<&Task> {
+        match self.nodes.get(id) {
+            Some(Node::Task(t)) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn get_task_mut(&mut self, id: &str) -> Option<&mut Task> {
+        match self.nodes.get_mut(id) {
+            Some(Node::Task(t)) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn get_actor(&self, id: &str) -> Option<&Actor> {
+        match self.nodes.get(id) {
+            Some(Node::Actor(a)) => Some(a),
+            _ => None,
+        }
+    }
+
+    pub fn get_resource(&self, id: &str) -> Option<&Resource> {
+        match self.nodes.get(id) {
+            Some(Node::Resource(r)) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.values()
+    }
+
+    pub fn tasks(&self) -> impl Iterator<Item = &Task> {
+        self.nodes.values().filter_map(|n| match n {
+            Node::Task(t) => Some(t),
+            _ => None,
+        })
+    }
+
+    pub fn actors(&self) -> impl Iterator<Item = &Actor> {
+        self.nodes.values().filter_map(|n| match n {
+            Node::Actor(a) => Some(a),
+            _ => None,
+        })
+    }
+
+    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
+        self.nodes.values().filter_map(|n| match n {
+            Node::Resource(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    pub fn remove_node(&mut self, id: &str) -> Option<Node> {
+        self.nodes.remove(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_task(id: &str, title: &str) -> Task {
+        Task {
+            id: id.to_string(),
+            title: title.to_string(),
+            status: Status::Open,
+            assigned: None,
+            estimate: None,
+            blocks: vec![],
+            blocked_by: vec![],
+            requires: vec![],
+            tags: vec![],
+        }
+    }
+
+    fn make_actor(id: &str, name: &str) -> Actor {
+        Actor {
+            id: id.to_string(),
+            name: Some(name.to_string()),
+            role: None,
+            rate: None,
+            capacity: None,
+        }
+    }
+
+    #[test]
+    fn test_workgraph_new_is_empty() {
+        let graph = WorkGraph::new();
+        assert!(graph.is_empty());
+        assert_eq!(graph.len(), 0);
+    }
+
+    #[test]
+    fn test_add_and_get_task() {
+        let mut graph = WorkGraph::new();
+        let task = make_task("api-design", "Design API");
+        graph.add_node(Node::Task(task));
+
+        assert_eq!(graph.len(), 1);
+        let retrieved = graph.get_task("api-design").unwrap();
+        assert_eq!(retrieved.title, "Design API");
+    }
+
+    #[test]
+    fn test_add_and_get_actor() {
+        let mut graph = WorkGraph::new();
+        let actor = make_actor("erik", "Erik");
+        graph.add_node(Node::Actor(actor));
+
+        let retrieved = graph.get_actor("erik").unwrap();
+        assert_eq!(retrieved.name, Some("Erik".to_string()));
+    }
+
+    #[test]
+    fn test_get_nonexistent_returns_none() {
+        let graph = WorkGraph::new();
+        assert!(graph.get_node("nonexistent").is_none());
+        assert!(graph.get_task("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_remove_node() {
+        let mut graph = WorkGraph::new();
+        graph.add_node(Node::Task(make_task("t1", "Task 1")));
+        assert_eq!(graph.len(), 1);
+
+        let removed = graph.remove_node("t1");
+        assert!(removed.is_some());
+        assert!(graph.is_empty());
+    }
+
+    #[test]
+    fn test_tasks_iterator() {
+        let mut graph = WorkGraph::new();
+        graph.add_node(Node::Task(make_task("t1", "Task 1")));
+        graph.add_node(Node::Task(make_task("t2", "Task 2")));
+        graph.add_node(Node::Actor(make_actor("a1", "Actor 1")));
+
+        let tasks: Vec<_> = graph.tasks().collect();
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_task_with_blocks() {
+        let mut graph = WorkGraph::new();
+        let mut task1 = make_task("api-design", "Design API");
+        task1.blocks = vec!["api-impl".to_string()];
+
+        let mut task2 = make_task("api-impl", "Implement API");
+        task2.blocked_by = vec!["api-design".to_string()];
+
+        graph.add_node(Node::Task(task1));
+        graph.add_node(Node::Task(task2));
+
+        let design = graph.get_task("api-design").unwrap();
+        assert_eq!(design.blocks, vec!["api-impl"]);
+
+        let impl_task = graph.get_task("api-impl").unwrap();
+        assert_eq!(impl_task.blocked_by, vec!["api-design"]);
+    }
+
+    #[test]
+    fn test_task_serialization() {
+        let task = make_task("t1", "Test task");
+        let json = serde_json::to_string(&Node::Task(task)).unwrap();
+        assert!(json.contains("\"kind\":\"task\""));
+        assert!(json.contains("\"id\":\"t1\""));
+    }
+
+    #[test]
+    fn test_task_deserialization() {
+        let json = r#"{"id":"t1","kind":"task","title":"Test","status":"open"}"#;
+        let node: Node = serde_json::from_str(json).unwrap();
+        match node {
+            Node::Task(t) => {
+                assert_eq!(t.id, "t1");
+                assert_eq!(t.title, "Test");
+                assert_eq!(t.status, Status::Open);
+            }
+            _ => panic!("Expected Task"),
+        }
+    }
+
+    #[test]
+    fn test_status_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Status::InProgress).unwrap(),
+            "\"in-progress\""
+        );
+    }
+}
