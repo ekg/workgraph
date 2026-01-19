@@ -87,6 +87,12 @@ enum Commands {
         id: String,
     },
 
+    /// Show the full transitive chain explaining why a task is blocked
+    WhyBlocked {
+        /// Task ID
+        id: String,
+    },
+
     /// Check the graph for issues (cycles, orphan references)
     Check,
 
@@ -137,6 +143,21 @@ enum Commands {
         #[arg(long)]
         at: Option<String>,
     },
+
+    /// Show impact analysis - what tasks depend on this one
+    Impact {
+        /// Task ID
+        id: String,
+    },
+
+    /// Analyze cycles in the graph with classification
+    Loops,
+
+    /// Analyze graph structure - entry points, dead ends, high-impact roots
+    Structure,
+
+    /// Find tasks blocking the most work (bottleneck analysis)
+    Bottlenecks,
 
     /// Manage resources
     Resource {
@@ -237,6 +258,7 @@ fn main() -> Result<()> {
         Commands::Unclaim { id } => commands::claim::unclaim(&workgraph_dir, &id),
         Commands::Ready => commands::ready::run(&workgraph_dir, cli.json),
         Commands::Blocked { id } => commands::blocked::run(&workgraph_dir, &id, cli.json),
+        Commands::WhyBlocked { id } => commands::why_blocked::run(&workgraph_dir, &id, cli.json),
         Commands::Check => commands::check::run(&workgraph_dir),
         Commands::List { status } => commands::list::run(&workgraph_dir, status.as_deref(), cli.json),
         Commands::Graph => commands::graph::run(&workgraph_dir),
@@ -250,6 +272,10 @@ fn main() -> Result<()> {
         Commands::Reschedule { id, after, at } => {
             commands::reschedule::run(&workgraph_dir, &id, after, at.as_deref())
         }
+        Commands::Impact { id } => commands::impact::run(&workgraph_dir, &id, cli.json),
+        Commands::Loops => commands::loops::run(&workgraph_dir, cli.json),
+        Commands::Structure => commands::structure::run(&workgraph_dir, cli.json),
+        Commands::Bottlenecks => commands::bottlenecks::run(&workgraph_dir, cli.json),
         Commands::Resource { command } => match command {
             ResourceCommands::Add {
                 id,

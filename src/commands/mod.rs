@@ -13,6 +13,11 @@ pub mod actor;
 pub mod coordinate;
 pub mod plan;
 pub mod reschedule;
+pub mod impact;
+pub mod loops;
+pub mod structure;
+pub mod why_blocked;
+pub mod bottlenecks;
 
 use std::path::Path;
 
