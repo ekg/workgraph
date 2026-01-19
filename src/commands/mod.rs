@@ -12,6 +12,7 @@ pub mod resource;
 pub mod actor;
 pub mod coordinate;
 pub mod plan;
+pub mod reschedule;
 
 use std::path::Path;
 

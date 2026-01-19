@@ -225,6 +225,7 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            not_before: None,
         }
     }
 

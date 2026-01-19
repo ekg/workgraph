@@ -1,6 +1,21 @@
 use crate::graph::{Status, Task, WorkGraph};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashSet;
+
+/// Check if a task is past its not_before timestamp (or has no timestamp)
+pub fn is_time_ready(task: &Task) -> bool {
+    match &task.not_before {
+        None => true,
+        Some(timestamp) => {
+            // Parse the timestamp - if invalid, treat as ready
+            match timestamp.parse::<DateTime<Utc>>() {
+                Ok(not_before) => Utc::now() >= not_before,
+                Err(_) => true, // Invalid timestamp = ready
+            }
+        }
+    }
+}
 
 /// Summary of project status
 #[derive(Debug, Clone, Serialize)]
@@ -203,13 +218,17 @@ where
     }
 }
 
-/// Find all tasks that are ready to work on (no open blockers)
+/// Find all tasks that are ready to work on (no open blockers, past not_before)
 pub fn ready_tasks(graph: &WorkGraph) -> Vec<&Task> {
     graph
         .tasks()
         .filter(|task| {
             // Must be open
             if task.status != Status::Open {
+                return false;
+            }
+            // Must be past not_before timestamp
+            if !is_time_ready(task) {
                 return false;
             }
             // All blockers must be done
@@ -287,6 +306,7 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            not_before: None,
         }
     }
 
@@ -639,5 +659,67 @@ mod tests {
         assert_eq!(result.exceeds.len(), 1);
         assert_eq!(result.exceeds[0].id, "t2");
         assert_eq!(result.remaining, 6.0);
+    }
+
+    #[test]
+    fn test_is_time_ready_no_timestamp() {
+        let task = make_task("t1", "Task 1");
+        assert!(is_time_ready(&task));
+    }
+
+    #[test]
+    fn test_is_time_ready_past_timestamp() {
+        let mut task = make_task("t1", "Task 1");
+        // Set to a time in the past
+        task.not_before = Some("2020-01-01T00:00:00Z".to_string());
+        assert!(is_time_ready(&task));
+    }
+
+    #[test]
+    fn test_is_time_ready_future_timestamp() {
+        let mut task = make_task("t1", "Task 1");
+        // Set to a time far in the future
+        task.not_before = Some("2099-01-01T00:00:00Z".to_string());
+        assert!(!is_time_ready(&task));
+    }
+
+    #[test]
+    fn test_is_time_ready_invalid_timestamp() {
+        let mut task = make_task("t1", "Task 1");
+        task.not_before = Some("not-a-timestamp".to_string());
+        // Invalid timestamp = treat as ready
+        assert!(is_time_ready(&task));
+    }
+
+    #[test]
+    fn test_ready_tasks_excludes_future_not_before() {
+        let mut graph = WorkGraph::new();
+
+        let mut t1 = make_task("t1", "Task 1");
+        t1.not_before = Some("2099-01-01T00:00:00Z".to_string());
+
+        let t2 = make_task("t2", "Task 2");
+
+        graph.add_node(Node::Task(t1));
+        graph.add_node(Node::Task(t2));
+
+        let ready = ready_tasks(&graph);
+        // Only t2 should be ready (t1 has future not_before)
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, "t2");
+    }
+
+    #[test]
+    fn test_ready_tasks_includes_past_not_before() {
+        let mut graph = WorkGraph::new();
+
+        let mut t1 = make_task("t1", "Task 1");
+        t1.not_before = Some("2020-01-01T00:00:00Z".to_string());
+
+        graph.add_node(Node::Task(t1));
+
+        let ready = ready_tasks(&graph);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].id, "t1");
     }
 }

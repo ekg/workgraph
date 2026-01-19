@@ -53,6 +53,7 @@ pub fn run(
         blocked_by: blocked_by.to_vec(),
         requires: vec![],
         tags: tags.to_vec(),
+        not_before: None,
     };
 
     // Append to file
