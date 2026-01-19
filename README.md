@@ -31,6 +31,41 @@ wg claim design-api
 wg done design-api
 ```
 
+## Conceptual Model
+
+**Core Entities**
+- **Tasks**: Units of work with a title, status, and optional metadata
+- **Actors**: Humans or AI agents that claim and complete tasks
+- **Resources**: Shared assets that tasks may require (future extension point)
+
+**The Graph Model**
+
+Tasks can block other tasks, forming a directed graph of dependencies. While typically a DAG, cycles are allowed for recurring/iterative work patterns. Use `wg why-blocked` to trace dependency chains and `wg impact` to see downstream effects.
+
+**Status Flow**
+
+```
+open → in-progress → done
+         ↑
+      (claim)
+```
+
+A task is **blocked** (derived state) when any of its blockers are incomplete. Only unblocked tasks appear in `wg ready`.
+
+**Timestamps**
+
+Each task tracks `created_at`, `started_at`, and `completed_at` for temporal analysis, forecasting, and performance metrics.
+
+**Agent Coordination**
+
+Multiple agents can work in parallel:
+1. `wg ready` — find available tasks
+2. `wg claim <id>` — atomically claim a task (prevents double-work)
+3. `wg done <id>` — mark complete, unblocking dependents
+4. `wg unclaim <id>` — release if interrupted
+
+The claim mechanism ensures safe concurrent execution across distributed agents.
+
 ## Commands
 
 | Command | Description |
