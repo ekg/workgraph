@@ -172,6 +172,18 @@ enum Commands {
     /// Show project completion forecast based on velocity and remaining work
     Forecast,
 
+    /// Show actor workload balance and assignment distribution
+    Workload,
+
+    /// Show resource utilization - committed vs available capacity
+    Resources,
+
+    /// Show the critical path (longest dependency chain)
+    CriticalPath,
+
+    /// Comprehensive health report combining all analyses
+    Analyze,
+
     /// Manage resources
     Resource {
         #[command(subcommand)]
@@ -292,6 +304,10 @@ fn main() -> Result<()> {
         Commands::Velocity { weeks } => commands::velocity::run(&workgraph_dir, cli.json, weeks),
         Commands::Aging => commands::aging::run(&workgraph_dir, cli.json),
         Commands::Forecast => commands::forecast::run(&workgraph_dir, cli.json),
+        Commands::Workload => commands::workload::run(&workgraph_dir, cli.json),
+        Commands::Resources => commands::resources::run(&workgraph_dir, cli.json),
+        Commands::CriticalPath => commands::critical_path::run(&workgraph_dir, cli.json),
+        Commands::Analyze => commands::analyze::run(&workgraph_dir, cli.json),
         Commands::Resource { command } => match command {
             ResourceCommands::Add {
                 id,

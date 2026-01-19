@@ -21,6 +21,10 @@ pub mod bottlenecks;
 pub mod velocity;
 pub mod aging;
 pub mod forecast;
+pub mod workload;
+pub mod resources;
+pub mod critical_path;
+pub mod analyze;
 
 use std::path::Path;
 
