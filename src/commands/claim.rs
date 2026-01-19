@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::path::Path;
 use workgraph::graph::Status;
 use workgraph::parser::{load_graph, save_graph};
@@ -31,6 +32,7 @@ pub fn claim(dir: &Path, id: &str, actor: Option<&str>) -> Result<()> {
     }
 
     task.status = Status::InProgress;
+    task.started_at = Some(Utc::now().to_rfc3339());
     if let Some(actor_id) = actor {
         task.assigned = Some(actor_id.to_string());
     }
@@ -86,6 +88,9 @@ mod tests {
             requires: vec![],
             tags: vec![],
             not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
         }
     }
 

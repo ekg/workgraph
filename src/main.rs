@@ -159,6 +159,19 @@ enum Commands {
     /// Find tasks blocking the most work (bottleneck analysis)
     Bottlenecks,
 
+    /// Show task completion velocity over time
+    Velocity {
+        /// Number of weeks to show (default: 4)
+        #[arg(long)]
+        weeks: Option<usize>,
+    },
+
+    /// Show task age distribution - how long tasks have been open
+    Aging,
+
+    /// Show project completion forecast based on velocity and remaining work
+    Forecast,
+
     /// Manage resources
     Resource {
         #[command(subcommand)]
@@ -276,6 +289,9 @@ fn main() -> Result<()> {
         Commands::Loops => commands::loops::run(&workgraph_dir, cli.json),
         Commands::Structure => commands::structure::run(&workgraph_dir, cli.json),
         Commands::Bottlenecks => commands::bottlenecks::run(&workgraph_dir, cli.json),
+        Commands::Velocity { weeks } => commands::velocity::run(&workgraph_dir, cli.json, weeks),
+        Commands::Aging => commands::aging::run(&workgraph_dir, cli.json),
+        Commands::Forecast => commands::forecast::run(&workgraph_dir, cli.json),
         Commands::Resource { command } => match command {
             ResourceCommands::Add {
                 id,

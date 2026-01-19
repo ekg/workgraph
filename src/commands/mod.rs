@@ -18,6 +18,9 @@ pub mod loops;
 pub mod structure;
 pub mod why_blocked;
 pub mod bottlenecks;
+pub mod velocity;
+pub mod aging;
+pub mod forecast;
 
 use std::path::Path;
 
