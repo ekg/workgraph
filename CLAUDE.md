@@ -1,6 +1,6 @@
 # Workgraph
 
-This project uses `wg` (workgraph) to coordinate work. The binary is at `./target/debug/workgraph`.
+This project uses `wg` (workgraph) to coordinate work. The binary is at `./target/debug/wg`.
 
 ## Quick Reference
 

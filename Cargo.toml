@@ -2,8 +2,12 @@
 name = "workgraph"
 version = "0.1.0"
 edition = "2024"
-description = "A lightweight work coordination graph with formal verification"
+description = "A lightweight work coordination graph for humans and AI agents"
 license = "MIT"
+
+[[bin]]
+name = "wg"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

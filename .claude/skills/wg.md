@@ -12,13 +12,13 @@ Interact with the workgraph task coordination system.
 
 ## Instructions
 
-Use `./target/debug/workgraph` (or `wg` if in PATH).
+Use `./target/debug/wg` (or `wg` if in PATH).
 
 ### `/wg` (default)
 
 ```bash
-./target/debug/workgraph ready
-./target/debug/workgraph check
+./target/debug/wg ready
+./target/debug/wg check
 ```
 
 Summarize what's ready and any issues.
@@ -26,22 +26,22 @@ Summarize what's ready and any issues.
 ### `/wg add <title>`
 
 ```bash
-./target/debug/workgraph add "<title>" [--blocked-by X] [--hours N] [--cost N] [-t tag]
+./target/debug/wg add "<title>" [--blocked-by X] [--hours N] [--cost N] [-t tag]
 ```
 
 ### `/wg done <id>`
 
 ```bash
-./target/debug/workgraph done <id>
-./target/debug/workgraph ready  # show what's unblocked
+./target/debug/wg done <id>
+./target/debug/wg ready  # show what's unblocked
 ```
 
 ### `/wg status`
 
 ```bash
-./target/debug/workgraph list
-./target/debug/workgraph bottlenecks
-./target/debug/workgraph forecast
+./target/debug/wg list
+./target/debug/wg bottlenecks
+./target/debug/wg forecast
 ```
 
 ## All Commands
