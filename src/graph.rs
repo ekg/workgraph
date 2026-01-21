@@ -28,6 +28,8 @@ pub enum Status {
     InProgress,
     Done,
     Blocked,
+    Failed,
+    Abandoned,
 }
 
 /// A task node
@@ -52,6 +54,15 @@ pub struct Task {
     pub requires: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Required skills/capabilities for this task
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// Input files/context paths needed for this task
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<String>,
+    /// Expected output paths/artifacts
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<String>,
     /// Task is not ready until this timestamp (ISO 8601 / RFC 3339)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_before: Option<String>,
@@ -67,6 +78,19 @@ pub struct Task {
     /// Progress log entries
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub log: Vec<LogEntry>,
+    /// Number of times this task has been retried after failure
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub retry_count: u32,
+    /// Maximum number of retries allowed (None = unlimited)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+    /// Reason for failure or abandonment
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
+
+fn is_zero(val: &u32) -> bool {
+    *val == 0
 }
 
 /// An actor (human or agent)
@@ -236,11 +260,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 
@@ -393,5 +423,39 @@ mod tests {
         assert!(!json.contains("created_at"));
         assert!(!json.contains("started_at"));
         assert!(!json.contains("completed_at"));
+    }
+
+    #[test]
+    fn test_deliverables_serialization() {
+        let mut task = make_task("t1", "Build feature");
+        task.deliverables = vec![
+            "src/feature.rs".to_string(),
+            "docs/feature.md".to_string(),
+        ];
+
+        let json = serde_json::to_string(&Node::Task(task)).unwrap();
+        assert!(json.contains("\"deliverables\""));
+        assert!(json.contains("src/feature.rs"));
+        assert!(json.contains("docs/feature.md"));
+
+        // Verify deserialization
+        let node: Node = serde_json::from_str(&json).unwrap();
+        match node {
+            Node::Task(t) => {
+                assert_eq!(t.deliverables.len(), 2);
+                assert!(t.deliverables.contains(&"src/feature.rs".to_string()));
+                assert!(t.deliverables.contains(&"docs/feature.md".to_string()));
+            }
+            _ => panic!("Expected Task"),
+        }
+    }
+
+    #[test]
+    fn test_deliverables_omitted_when_empty() {
+        let task = make_task("t1", "Test task");
+        let json = serde_json::to_string(&Node::Task(task)).unwrap();
+
+        // Verify deliverables not included when empty
+        assert!(!json.contains("deliverables"));
     }
 }

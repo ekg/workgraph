@@ -188,6 +188,8 @@ pub fn run(dir: &Path, json: bool) -> Result<()> {
                     Status::Open | Status::InProgress => "ready",
                     Status::Blocked => "blocked",
                     Status::Done => "done",
+                    Status::Failed => "failed",
+                    Status::Abandoned => "abandoned",
                 };
 
                 let hours_str = task
@@ -393,11 +395,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 
@@ -416,11 +424,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 

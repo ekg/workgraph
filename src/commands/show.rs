@@ -14,6 +14,10 @@ struct BlockerInfo {
     status: Status,
 }
 
+fn is_zero(val: &u32) -> bool {
+    *val == 0
+}
+
 /// JSON output structure for show command
 #[derive(Debug, Serialize)]
 struct TaskDetails {
@@ -30,6 +34,12 @@ struct TaskDetails {
     cost: Option<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tags: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skills: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    inputs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    deliverables: Vec<String>,
     blocked_by: Vec<BlockerInfo>,
     blocks: Vec<BlockerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,6 +52,12 @@ struct TaskDetails {
     not_before: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     log: Vec<LogEntry>,
+    #[serde(skip_serializing_if = "is_zero")]
+    retry_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_retries: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_reason: Option<String>,
 }
 
 pub fn run(dir: &Path, id: &str, json: bool) -> Result<()> {
@@ -105,6 +121,9 @@ pub fn run(dir: &Path, id: &str, json: bool) -> Result<()> {
         hours: task.estimate.as_ref().and_then(|e| e.hours),
         cost: task.estimate.as_ref().and_then(|e| e.cost),
         tags: task.tags.clone(),
+        skills: task.skills.clone(),
+        inputs: task.inputs.clone(),
+        deliverables: task.deliverables.clone(),
         blocked_by: blocked_by_info,
         blocks: blocks_info,
         created_at: task.created_at.clone(),
@@ -112,6 +131,9 @@ pub fn run(dir: &Path, id: &str, json: bool) -> Result<()> {
         completed_at: task.completed_at.clone(),
         not_before: task.not_before.clone(),
         log: task.log.clone(),
+        retry_count: task.retry_count,
+        max_retries: task.max_retries,
+        failure_reason: task.failure_reason.clone(),
     };
 
     if json {
@@ -130,6 +152,22 @@ fn print_human_readable(details: &TaskDetails) {
 
     if let Some(ref assigned) = details.assigned {
         println!("Assigned: {}", assigned);
+    }
+
+    // Failure info
+    if details.status == Status::Failed || details.status == Status::Abandoned {
+        if let Some(ref reason) = details.failure_reason {
+            println!("Failure reason: {}", reason);
+        }
+    }
+    if details.retry_count > 0 {
+        let retry_info = match details.max_retries {
+            Some(max) => format!("Retry count: {}/{}", details.retry_count, max),
+            None => format!("Retry count: {}", details.retry_count),
+        };
+        println!("{}", retry_info);
+    } else if details.max_retries.is_some() {
+        println!("Max retries: {}", details.max_retries.unwrap());
     }
 
     // Description
@@ -159,6 +197,21 @@ fn print_human_readable(details: &TaskDetails) {
     // Tags
     if !details.tags.is_empty() {
         println!("Tags: {}", details.tags.join(", "));
+    }
+
+    // Skills
+    if !details.skills.is_empty() {
+        println!("Skills: {}", details.skills.join(", "));
+    }
+
+    // Inputs
+    if !details.inputs.is_empty() {
+        println!("Inputs: {}", details.inputs.join(", "));
+    }
+
+    // Deliverables
+    if !details.deliverables.is_empty() {
+        println!("Deliverables: {}", details.deliverables.join(", "));
     }
 
     println!();
@@ -222,6 +275,8 @@ fn format_status(status: &Status) -> &'static str {
         Status::InProgress => "in-progress",
         Status::Done => "done",
         Status::Blocked => "blocked",
+        Status::Failed => "failed",
+        Status::Abandoned => "abandoned",
     }
 }
 
@@ -258,11 +313,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 
@@ -306,6 +367,9 @@ mod tests {
             hours: Some(2.0),
             cost: Some(200.0),
             tags: vec!["test".to_string()],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             blocked_by: vec![],
             blocks: vec![BlockerInfo {
                 id: "t2".to_string(),
@@ -316,6 +380,9 @@ mod tests {
             completed_at: None,
             not_before: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         };
 
         let json = serde_json::to_string(&details).unwrap();
