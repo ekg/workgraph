@@ -50,6 +50,8 @@ pub fn run(dir: &Path, status_filter: Option<&str>, json: bool) -> Result<()> {
                     Status::InProgress => "[~]",
                     Status::Done => "[x]",
                     Status::Blocked => "[!]",
+                    Status::Failed => "[F]",
+                    Status::Abandoned => "[A]",
                 };
                 println!("{} {} - {}", status, task.id, task.title);
             }

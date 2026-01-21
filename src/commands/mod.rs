@@ -1,6 +1,9 @@
 pub mod init;
 pub mod add;
 pub mod done;
+pub mod fail;
+pub mod abandon;
+pub mod retry;
 pub mod claim;
 pub mod ready;
 pub mod blocked;
@@ -29,6 +32,7 @@ pub mod archive;
 pub mod log;
 pub mod show;
 pub mod viz;
+pub mod skills;
 
 use std::path::Path;
 

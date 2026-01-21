@@ -58,11 +58,53 @@ enum Commands {
         /// Tags
         #[arg(long, short)]
         tag: Vec<String>,
+
+        /// Required skills/capabilities for this task
+        #[arg(long)]
+        skill: Vec<String>,
+
+        /// Input files/context paths needed for this task
+        #[arg(long)]
+        input: Vec<String>,
+
+        /// Expected output paths/artifacts
+        #[arg(long)]
+        deliverable: Vec<String>,
+
+        /// Maximum number of retries allowed for this task
+        #[arg(long)]
+        max_retries: Option<u32>,
     },
 
     /// Mark a task as done
     Done {
         /// Task ID to mark as done
+        id: String,
+    },
+
+    /// Mark a task as failed (can be retried)
+    Fail {
+        /// Task ID to mark as failed
+        id: String,
+
+        /// Reason for failure
+        #[arg(long)]
+        reason: Option<String>,
+    },
+
+    /// Mark a task as abandoned (will not be retried)
+    Abandon {
+        /// Task ID to abandon
+        id: String,
+
+        /// Reason for abandonment
+        #[arg(long)]
+        reason: Option<String>,
+    },
+
+    /// Retry a failed task (resets to open status)
+    Retry {
+        /// Task ID to retry
         id: String,
     },
 
@@ -260,6 +302,17 @@ enum Commands {
         #[command(subcommand)]
         command: ActorCommands,
     },
+
+    /// List and find skills across tasks
+    Skills {
+        /// Show skills for a specific task
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Find tasks requiring a specific skill
+        #[arg(long)]
+        find: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -334,6 +387,10 @@ fn main() -> Result<()> {
             hours,
             cost,
             tag,
+            skill,
+            input,
+            deliverable,
+            max_retries,
         } => commands::add::run(
             &workgraph_dir,
             &title,
@@ -344,8 +401,15 @@ fn main() -> Result<()> {
             hours,
             cost,
             &tag,
+            &skill,
+            &input,
+            &deliverable,
+            max_retries,
         ),
         Commands::Done { id } => commands::done::run(&workgraph_dir, &id),
+        Commands::Fail { id, reason } => commands::fail::run(&workgraph_dir, &id, reason.as_deref()),
+        Commands::Abandon { id, reason } => commands::abandon::run(&workgraph_dir, &id, reason.as_deref()),
+        Commands::Retry { id } => commands::retry::run(&workgraph_dir, &id),
         Commands::Claim { id, actor } => commands::claim::claim(&workgraph_dir, &id, actor.as_deref()),
         Commands::Unclaim { id } => commands::claim::unclaim(&workgraph_dir, &id),
         Commands::Ready => commands::ready::run(&workgraph_dir, cli.json),
@@ -444,5 +508,14 @@ fn main() -> Result<()> {
             ),
             ActorCommands::List => commands::actor::run_list(&workgraph_dir, cli.json),
         },
+        Commands::Skills { task, find } => {
+            if let Some(task_id) = task {
+                commands::skills::run_task(&workgraph_dir, &task_id, cli.json)
+            } else if let Some(skill) = find {
+                commands::skills::run_find(&workgraph_dir, &skill, cli.json)
+            } else {
+                commands::skills::run_list(&workgraph_dir, cli.json)
+            }
+        }
     }
 }

@@ -150,11 +150,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 

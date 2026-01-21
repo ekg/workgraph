@@ -18,6 +18,10 @@ pub fn run(
     hours: Option<f64>,
     cost: Option<f64>,
     tags: &[String],
+    skills: &[String],
+    inputs: &[String],
+    deliverables: &[String],
+    max_retries: Option<u32>,
 ) -> Result<()> {
     let path = graph_path(dir);
 
@@ -56,11 +60,17 @@ pub fn run(
         blocked_by: blocked_by.to_vec(),
         requires: vec![],
         tags: tags.to_vec(),
+        skills: skills.to_vec(),
+        inputs: inputs.to_vec(),
+        deliverables: deliverables.to_vec(),
         not_before: None,
         created_at: Some(Utc::now().to_rfc3339()),
         started_at: None,
         completed_at: None,
         log: vec![],
+        retry_count: 0,
+        max_retries,
+        failure_reason: None,
     };
 
     // Append to file

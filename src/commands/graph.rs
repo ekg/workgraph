@@ -27,6 +27,8 @@ pub fn run(dir: &Path) -> Result<()> {
             Status::InProgress => "style=filled, fillcolor=lightyellow",
             Status::Blocked => "style=filled, fillcolor=lightcoral",
             Status::Open => "style=filled, fillcolor=white",
+            Status::Failed => "style=filled, fillcolor=salmon",
+            Status::Abandoned => "style=filled, fillcolor=lightgray",
         };
         println!("  \"{}\" [label=\"{}\\n{}\", {}];", task.id, task.id, task.title, style);
     }

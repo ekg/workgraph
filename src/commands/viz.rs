@@ -72,6 +72,8 @@ pub fn run(dir: &Path, options: VizOptions) -> Result<()> {
                     Status::InProgress => "in-progress",
                     Status::Done => "done",
                     Status::Blocked => "blocked",
+                    Status::Failed => "failed",
+                    Status::Abandoned => "abandoned",
                 };
                 return task_status == status_filter.to_lowercase();
             }
@@ -132,6 +134,8 @@ fn generate_dot(
             Status::InProgress => "style=filled, fillcolor=lightyellow",
             Status::Blocked => "style=filled, fillcolor=lightcoral",
             Status::Open => "style=filled, fillcolor=white",
+            Status::Failed => "style=filled, fillcolor=salmon",
+            Status::Abandoned => "style=filled, fillcolor=lightgray",
         };
 
         // Build label with hours estimate if available
@@ -269,6 +273,8 @@ fn generate_mermaid(
             Status::InProgress => format!("  {}((\"{}\"))", task.id, label),
             Status::Blocked => format!("  {}{{\"{}\"}}!", task.id, label),
             Status::Open => format!("  {}[\"{}\"]", task.id, label),
+            Status::Failed => format!("  {}{{{{\"{}\"}}}}!", task.id, label),
+            Status::Abandoned => format!("  {}[\"{}\"]:::abandoned", task.id, label),
         };
         lines.push(node);
     }
@@ -483,11 +489,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 
@@ -506,11 +518,17 @@ mod tests {
             blocked_by: vec![],
             requires: vec![],
             tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
             not_before: None,
             created_at: None,
             started_at: None,
             completed_at: None,
             log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
         }
     }
 
