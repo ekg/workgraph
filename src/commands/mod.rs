@@ -37,6 +37,7 @@ pub mod match_cmd;
 pub mod heartbeat;
 pub mod artifact;
 pub mod context;
+pub mod next;
 
 use std::path::Path;
 

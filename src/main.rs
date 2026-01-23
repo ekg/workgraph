@@ -356,6 +356,13 @@ enum Commands {
         #[arg(long)]
         dependents: bool,
     },
+
+    /// Find the best next task for an actor (agent work loop)
+    Next {
+        /// Actor ID to find tasks for
+        #[arg(long)]
+        actor: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -608,5 +615,6 @@ fn main() -> Result<()> {
                 commands::context::run(&workgraph_dir, &task, cli.json)
             }
         }
+        Commands::Next { actor } => commands::next::run(&workgraph_dir, &actor, cli.json),
     }
 }
