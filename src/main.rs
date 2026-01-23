@@ -313,6 +313,26 @@ enum Commands {
         #[arg(long)]
         find: Option<String>,
     },
+
+    /// Find actors capable of performing a task
+    Match {
+        /// Task ID to match actors against
+        task: String,
+    },
+
+    /// Record actor heartbeat or check for stale actors
+    Heartbeat {
+        /// Actor ID to record heartbeat for (omit to check status)
+        actor: Option<String>,
+
+        /// Check for stale actors (no heartbeat within threshold)
+        #[arg(long)]
+        check: bool,
+
+        /// Minutes without heartbeat before actor is considered stale (default: 5)
+        #[arg(long, default_value = "5")]
+        threshold: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -365,6 +385,18 @@ enum ActorCommands {
         /// Available hours (capacity)
         #[arg(long)]
         capacity: Option<f64>,
+
+        /// Capabilities/skills this actor has (can be repeated)
+        #[arg(long = "capability", short = 'c')]
+        capabilities: Vec<String>,
+
+        /// Maximum context size in tokens
+        #[arg(long)]
+        context_limit: Option<u64>,
+
+        /// Trust level: verified, provisional, unknown
+        #[arg(long)]
+        trust_level: Option<String>,
     },
 
     /// List all actors
@@ -498,6 +530,9 @@ fn main() -> Result<()> {
                 role,
                 rate,
                 capacity,
+                capabilities,
+                context_limit,
+                trust_level,
             } => commands::actor::run_add(
                 &workgraph_dir,
                 &id,
@@ -505,6 +540,9 @@ fn main() -> Result<()> {
                 role.as_deref(),
                 rate,
                 capacity,
+                &capabilities,
+                context_limit,
+                trust_level.as_deref(),
             ),
             ActorCommands::List => commands::actor::run_list(&workgraph_dir, cli.json),
         },
@@ -515,6 +553,18 @@ fn main() -> Result<()> {
                 commands::skills::run_find(&workgraph_dir, &skill, cli.json)
             } else {
                 commands::skills::run_list(&workgraph_dir, cli.json)
+            }
+        }
+        Commands::Match { task } => commands::match_cmd::run(&workgraph_dir, &task, cli.json),
+        Commands::Heartbeat {
+            actor,
+            check,
+            threshold,
+        } => {
+            if check || actor.is_none() {
+                commands::heartbeat::run_check(&workgraph_dir, threshold, cli.json)
+            } else {
+                commands::heartbeat::run(&workgraph_dir, actor.as_deref().unwrap())
             }
         }
     }

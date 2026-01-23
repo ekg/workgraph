@@ -33,6 +33,8 @@ pub mod log;
 pub mod show;
 pub mod viz;
 pub mod skills;
+pub mod match_cmd;
+pub mod heartbeat;
 
 use std::path::Path;
 
