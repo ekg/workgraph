@@ -214,7 +214,7 @@ fn print_human_readable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use workgraph::graph::{Actor, Estimate, Node, Task, WorkGraph};
+    use workgraph::graph::{Actor, Estimate, Node, Task, TrustLevel, WorkGraph};
 
     fn make_task(id: &str, title: &str) -> Task {
         Task {
@@ -249,6 +249,10 @@ mod tests {
             role: None,
             rate: None,
             capacity,
+            capabilities: vec![],
+            context_limit: None,
+            trust_level: TrustLevel::Provisional,
+            last_seen: None,
         }
     }
 
@@ -259,7 +263,7 @@ mod tests {
         let ready_ids: std::collections::HashSet<&str> =
             ready.iter().map(|t| t.id.as_str()).collect();
 
-        let mut actor_workloads: HashMap<String, ActorWorkload> = HashMap::new();
+        let actor_workloads: HashMap<String, ActorWorkload> = HashMap::new();
         let mut unassigned_count = 0;
         let mut ready_unassigned_count = 0;
 
@@ -576,6 +580,10 @@ mod tests {
             role: Some("agent".to_string()),
             rate: None,
             capacity: None,
+            capabilities: vec![],
+            context_limit: None,
+            trust_level: TrustLevel::Provisional,
+            last_seen: None,
         };
         graph.add_node(Node::Actor(actor));
 

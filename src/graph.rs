@@ -93,6 +93,19 @@ fn is_zero(val: &u32) -> bool {
     *val == 0
 }
 
+/// Trust level for an actor
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrustLevel {
+    /// Fully verified actor (human admin, proven agent)
+    Verified,
+    /// Provisionally trusted (new agent, limited permissions)
+    #[default]
+    Provisional,
+    /// Unknown trust (external agent, needs verification)
+    Unknown,
+}
+
 /// An actor (human or agent)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Actor {
@@ -105,6 +118,22 @@ pub struct Actor {
     pub rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity: Option<f64>,
+    /// Skills/capabilities this actor has (for task matching)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    /// Maximum context size this actor can handle (in tokens)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_limit: Option<u64>,
+    /// Trust level for this actor
+    #[serde(default, skip_serializing_if = "is_default_trust")]
+    pub trust_level: TrustLevel,
+    /// Last heartbeat timestamp (ISO 8601)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+}
+
+fn is_default_trust(level: &TrustLevel) -> bool {
+    *level == TrustLevel::Provisional
 }
 
 /// A resource (budget, compute, etc.)
@@ -199,6 +228,13 @@ impl WorkGraph {
         }
     }
 
+    pub fn get_actor_mut(&mut self, id: &str) -> Option<&mut Actor> {
+        match self.nodes.get_mut(id) {
+            Some(Node::Actor(a)) => Some(a),
+            _ => None,
+        }
+    }
+
     pub fn get_resource(&self, id: &str) -> Option<&Resource> {
         match self.nodes.get(id) {
             Some(Node::Resource(r)) => Some(r),
@@ -281,6 +317,10 @@ mod tests {
             role: None,
             rate: None,
             capacity: None,
+            capabilities: vec![],
+            context_limit: None,
+            trust_level: TrustLevel::Provisional,
+            last_seen: None,
         }
     }
 
