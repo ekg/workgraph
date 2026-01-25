@@ -17,90 +17,245 @@ wg claim design-the-api --actor erik
 wg done design-the-api   # automatically unblocks the next task
 ```
 
-That's it. Tasks flow through `open → in-progress → done`. Dependencies are respected. No one works on the same thing twice.
+Tasks flow through `open → in-progress → done`. Dependencies are respected. No one works on the same thing twice.
 
 ## Install
 
+From source:
+
 ```bash
+git clone https://github.com/ekg/workgraph
+cd workgraph
 cargo install --path .
 ```
 
-## The basics
-
-**Tasks** are units of work. They have a status, can block other tasks, and track who's working on them.
-
-**Actors** are the humans or AI agents doing the work. They claim tasks, complete them, and move on.
-
-**The graph** is just tasks pointing at other tasks. "I can't start until X is done." Usually it's a nice clean DAG, but cycles are fine too for iterative stuff.
-
-## Working with it
+Or directly via cargo:
 
 ```bash
-# See what's ready
-wg ready
-
-# Claim something
-wg claim design-api --actor alice
-
-# Log progress as you go
-wg log design-api "Finished endpoint specs"
-
-# Done
-wg done design-api
-
-# Blocked? Find out why
-wg why-blocked build-backend
-
-# What happens if I finish this?
-wg impact design-api
+cargo install --git https://github.com/ekg/workgraph
 ```
 
-## For AI agents
-
-Agents can run autonomously:
+Verify it works:
 
 ```bash
-# Register an agent
-wg actor add claude-1 --role agent -c coding -c testing
+wg --help
+```
 
-# Let it loose
+## Setup
+
+### 1. Initialize in your project
+
+```bash
+cd your-project
+wg init
+```
+
+This creates `.workgraph/` with your task graph.
+
+### 2. Add some tasks
+
+```bash
+# Simple task
+wg add "Set up CI pipeline"
+
+# Task with a blocker
+wg add "Deploy to staging" --blocked-by set-up-ci-pipeline
+
+# Task with metadata
+wg add "Implement auth" \
+  --hours 8 \
+  --skill rust \
+  --skill security \
+  --deliverable src/auth.rs
+```
+
+### 3. Register yourself (or your agent)
+
+```bash
+# Human
+wg actor add erik --name "Erik" --role engineer -c rust -c python
+
+# AI agent
+wg actor add claude --name "Claude" --role agent -c coding -c testing -c docs
+```
+
+### 4. Start working
+
+```bash
+wg ready                         # see what's available
+wg claim set-up-ci-pipeline --actor erik
+# ... do the work ...
+wg done set-up-ci-pipeline       # unblocks deploy-to-staging
+```
+
+## Using with Claude Code
+
+Add this to your project's `CLAUDE.md`:
+
+```markdown
+## Task Coordination
+
+This project uses workgraph for task management. Follow this protocol:
+
+### Before starting work
+1. Run `wg ready` to see available tasks
+2. Run `wg claim <task-id> --actor claude` to claim one
+3. Run `wg show <task-id>` for full details
+4. Run `wg context <task-id>` to see available inputs from dependencies
+
+### While working
+- Log progress: `wg log <task-id> "Did X, working on Y"`
+- If you produce output files: `wg artifact <task-id> path/to/file`
+
+### When done
+- Success: `wg done <task-id>`
+- Failed: `wg fail <task-id> --reason "why"`
+- Need to stop: `wg unclaim <task-id>`
+
+### If you discover new work
+- Add it: `wg add "New task" --blocked-by current-task`
+- Check impact: `wg impact <task-id>`
+```
+
+When you start a Claude Code session, it'll follow this protocol automatically.
+
+## Agentic workflows
+
+### Pattern 1: Human plans, agent executes
+
+You define the work, agent does it:
+
+```bash
+# You: create the plan
+wg add "Refactor auth module" --skill rust
+wg add "Update tests" --blocked-by refactor-auth-module --skill testing
+wg add "Update docs" --blocked-by refactor-auth-module --skill docs
+
+# Agent: execute
+wg agent --actor claude --max-tasks 10
+```
+
+The agent will work through ready tasks, respecting dependencies.
+
+### Pattern 2: Agent plans and executes
+
+Let the agent figure out what needs doing:
+
+```markdown
+# In CLAUDE.md or your prompt:
+
+Break down this goal into tasks using workgraph:
+1. Analyze what needs to be done
+2. Create tasks with `wg add`, linking dependencies with --blocked-by
+3. Work through them with `wg ready` / `wg claim` / `wg done`
+4. If you discover more work, add it to the graph
+```
+
+### Pattern 3: Top-level coordinator
+
+One agent manages the work, spawns sub-agents for execution:
+
+```markdown
+# Coordinator prompt:
+
+You are a project coordinator. Your job:
+1. Check `wg ready` for available work
+2. For each ready task, spawn a sub-agent to handle it
+3. Sub-agents should `wg claim`, do the work, then `wg done` or `wg fail`
+4. Monitor progress with `wg list` and `wg analyze`
+5. Replan if needed - add tasks, adjust dependencies
+6. Continue until `wg ready` returns nothing and all tasks are done
+```
+
+### Pattern 4: Parallel agents
+
+Multiple agents working simultaneously:
+
+```bash
+# Terminal 1
 wg agent --actor claude-1
+
+# Terminal 2
+wg agent --actor claude-2
+
+# Terminal 3
+wg agent --actor claude-3
 ```
 
-The agent loops: wake up, find work, claim it, do it, mark done, sleep, repeat. Multiple agents can run in parallel on independent tasks.
+Each agent claims different tasks. The claim mechanism prevents conflicts.
 
-For tasks with shell commands attached:
+### Pattern 5: Mixed human + AI
 
 ```bash
-wg exec run-tests --set "cargo test"
-wg agent --actor ci-bot  # will automatically run the command
+# Human claims the design work
+wg claim design-api --actor erik
+
+# Agent handles implementation once design is done
+wg agent --actor claude
 ```
 
-## Analysis
+The agent waits for your work to complete before touching dependent tasks.
+
+## The recommended flow
+
+For most projects:
+
+1. **Plan first**: Sketch out the major tasks and dependencies
+   ```bash
+   wg add "Goal task"
+   wg add "Step 1"
+   wg add "Step 2" --blocked-by step-1
+   wg add "Step 3" --blocked-by step-2
+   # ... etc
+   ```
+
+2. **Check the structure**:
+   ```bash
+   wg analyze        # health check
+   wg critical-path  # what's the longest chain?
+   wg bottlenecks    # what should we prioritize?
+   ```
+
+3. **Execute**: Either manually or with agents
+   ```bash
+   wg agent --actor claude --once  # one task at a time, review between
+   # or
+   wg agent --actor claude         # let it run
+   ```
+
+4. **Adapt**: As you learn more, update the graph
+   ```bash
+   wg add "New thing we discovered" --blocked-by whatever
+   wg fail stuck-task --reason "Need to rethink this"
+   wg retry stuck-task  # when ready to try again
+   ```
+
+5. **Ship**: When `wg ready` is empty and everything important is done, you're there.
+
+## Key concepts
+
+**Tasks** have a status (`open`, `in-progress`, `done`, `failed`, `abandoned`) and can block other tasks.
+
+**Actors** are humans or AI agents. They claim tasks to work on them.
+
+**The graph** is tasks connected by "blocked-by" relationships. A task is blocked until all its blockers are done.
+
+**Context flow**: Tasks can declare inputs (what they need) and deliverables (what they produce). Use `wg context <task>` to see what's available.
+
+**Trajectories**: For AI agents, `wg trajectory <task>` suggests the best order to claim related tasks, minimizing context switches.
+
+## Analysis commands
 
 ```bash
-wg bottlenecks     # what's blocking the most stuff?
-wg critical-path   # longest chain = minimum time to finish
+wg ready           # what can be worked on now?
+wg list            # all tasks
+wg show <id>       # full task details
+wg why-blocked <id> # trace the blocker chain
+wg impact <id>     # what depends on this?
+wg bottlenecks     # tasks blocking the most work
+wg critical-path   # longest dependency chain
 wg forecast        # when will we be done?
-wg analyze         # full health report
-```
-
-## Context flow
-
-Tasks can declare what files they need and what they produce:
-
-```bash
-wg add "Design schema" --deliverable schema.sql
-wg add "Build DB layer" --blocked-by design-schema --input schema.sql
-
-# Later, see what's available
-wg context build-db-layer
-```
-
-For AI agents with limited context windows, trajectories suggest the best order to claim tasks:
-
-```bash
-wg trajectory design-schema  # shows the chain of related work
+wg analyze         # comprehensive health report
 ```
 
 ## Storage
@@ -110,26 +265,25 @@ Everything lives in `.workgraph/graph.jsonl`. One JSON object per line. Human-re
 ```jsonl
 {"kind":"task","id":"design-api","title":"Design the API","status":"done"}
 {"kind":"task","id":"build-backend","title":"Build the backend","status":"open","blocked_by":["design-api"]}
-{"kind":"actor","id":"alice","name":"Alice","role":"engineer"}
+{"kind":"actor","id":"claude","name":"Claude","role":"agent","capabilities":["coding","testing"]}
 ```
 
-## Commands at a glance
+Configuration is in `.workgraph/config.toml`:
 
-| Command | What it does |
-|---------|--------------|
-| `wg init` | Start a new workgraph |
-| `wg add "title"` | Create a task |
-| `wg ready` | What can be worked on now? |
-| `wg claim <id>` | Take a task |
-| `wg done <id>` | Finish a task |
-| `wg fail <id>` | Mark as failed (can retry later) |
-| `wg why-blocked <id>` | Trace the blocker chain |
-| `wg impact <id>` | What depends on this? |
-| `wg bottlenecks` | Find high-impact tasks |
-| `wg agent --actor X` | Run autonomous agent loop |
-| `wg analyze` | Full project health report |
+```toml
+[agent]
+executor = "claude"
+model = "opus-4-5"
+interval = 10
 
-See `wg --help` for everything else, or check [docs/](docs/) for the deep dive.
+[project]
+name = "My Project"
+```
+
+## More docs
+
+- [docs/COMMANDS.md](docs/COMMANDS.md) - Complete command reference
+- [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) - Deep dive on agent operation
 
 ## License
 
