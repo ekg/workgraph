@@ -1,0 +1,12 @@
+{
+  "actor_id": "alice",
+  "total_tasks_completed": 0,
+  "total_tasks_failed": 0,
+  "total_iterations": 2,
+  "total_idle_iterations": 2,
+  "task_history": [],
+  "session_count": 2,
+  "first_run": "2026-01-25T16:03:34.127572129+00:00",
+  "last_run": "2026-01-25T16:03:39.542163218+00:00",
+  "last_saved": "2026-01-25T16:03:39.542840677+00:00"
+}

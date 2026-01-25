@@ -124,6 +124,20 @@ enum Commands {
         id: String,
     },
 
+    /// Reclaim a task from a dead/unresponsive agent
+    Reclaim {
+        /// Task ID to reclaim
+        id: String,
+
+        /// The actor currently holding the task
+        #[arg(long)]
+        from: String,
+
+        /// The new actor to assign the task to
+        #[arg(long)]
+        to: String,
+    },
+
     /// List tasks that are ready to work on
     Ready,
 
@@ -413,6 +427,10 @@ enum Commands {
         /// Maximum number of tasks to complete before stopping
         #[arg(long)]
         max_tasks: Option<u32>,
+
+        /// Reset agent state (discard saved statistics and task history)
+        #[arg(long)]
+        reset_state: bool,
     },
 
     /// View or modify project configuration
@@ -548,6 +566,7 @@ fn main() -> Result<()> {
         Commands::Retry { id } => commands::retry::run(&workgraph_dir, &id),
         Commands::Claim { id, actor } => commands::claim::claim(&workgraph_dir, &id, actor.as_deref()),
         Commands::Unclaim { id } => commands::claim::unclaim(&workgraph_dir, &id),
+        Commands::Reclaim { id, from, to } => commands::reclaim::run(&workgraph_dir, &id, &from, &to),
         Commands::Ready => commands::ready::run(&workgraph_dir, cli.json),
         Commands::Blocked { id } => commands::blocked::run(&workgraph_dir, &id, cli.json),
         Commands::WhyBlocked { id } => commands::why_blocked::run(&workgraph_dir, &id, cli.json),
@@ -717,7 +736,8 @@ fn main() -> Result<()> {
             once,
             interval,
             max_tasks,
-        } => commands::agent::run(&workgraph_dir, &actor, once, interval, max_tasks, cli.json),
+            reset_state,
+        } => commands::agent::run(&workgraph_dir, &actor, once, interval, max_tasks, reset_state, cli.json),
         Commands::Config {
             show,
             init,
