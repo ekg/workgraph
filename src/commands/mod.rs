@@ -5,6 +5,7 @@ pub mod fail;
 pub mod abandon;
 pub mod retry;
 pub mod claim;
+pub mod reclaim;
 pub mod ready;
 pub mod blocked;
 pub mod check;
