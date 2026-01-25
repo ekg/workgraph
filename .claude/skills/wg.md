@@ -1,75 +1,175 @@
-# Workgraph Skill
+# workgraph
 
-Interact with the workgraph task coordination system.
+Structured task coordination for complex work. Use this when you need to break down, track, and execute multi-step projects.
 
-## Invocation
+## When to use workgraph
 
-- `/wg` - Show status and ready tasks
-- `/wg ready` - List ready tasks
-- `/wg add <title>` - Add a task
-- `/wg done <id>` - Mark complete
-- `/wg status` - Full project status
+- Projects with multiple dependent tasks
+- Work that spans multiple sessions
+- Coordinating between humans and AI agents
+- Anything where you need to track "what's done, what's next, what's blocked"
 
-## Instructions
-
-Use `./target/debug/wg` (or `wg` if in PATH).
-
-### `/wg` (default)
+## Quick check
 
 ```bash
-./target/debug/wg ready
-./target/debug/wg check
+wg ready    # what can I work on?
+wg list     # all tasks
+wg analyze  # project health
 ```
 
-Summarize what's ready and any issues.
+## The protocol
 
-### `/wg add <title>`
+### Starting work
 
+1. Check what's available:
+   ```bash
+   wg ready
+   ```
+
+2. Claim a task:
+   ```bash
+   wg claim <task-id> --actor claude
+   ```
+
+3. Understand the task:
+   ```bash
+   wg show <task-id>      # full details
+   wg context <task-id>   # inputs from dependencies
+   ```
+
+### While working
+
+Log progress (helps with context recovery if interrupted):
 ```bash
-./target/debug/wg add "<title>" [--blocked-by X] [--hours N] [--cost N] [-t tag]
+wg log <task-id> "Completed X, now working on Y"
 ```
 
-### `/wg done <id>`
-
+If you produce output files:
 ```bash
-./target/debug/wg done <id>
-./target/debug/wg ready  # show what's unblocked
+wg artifact <task-id> path/to/output
 ```
 
-### `/wg status`
+### Finishing
 
+Success:
 ```bash
-./target/debug/wg list
-./target/debug/wg bottlenecks
-./target/debug/wg forecast
+wg done <task-id>
 ```
 
-## All Commands
+Failed (can retry later):
+```bash
+wg fail <task-id> --reason "why it failed"
+```
 
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize workgraph |
-| `add` | Add task |
-| `done` | Mark done |
-| `claim/unclaim` | Agent coordination |
-| `ready` | List ready tasks |
-| `list` | List all tasks |
-| `blocked <id>` | Direct blockers |
-| `why-blocked <id>` | Full blocker chain |
-| `impact <id>` | What depends on this |
-| `bottlenecks` | Tasks blocking most work |
-| `structure` | Entry points, dead ends |
-| `loops` | Cycle detection |
-| `aging` | Task age distribution |
-| `velocity` | Completion rate |
-| `forecast` | Project completion estimate |
-| `plan` | Budget/hours planning |
-| `cost <id>` | Cost with dependencies |
-| `check` | Verify graph health |
-| `graph` | DOT output |
-| `actor add/list` | Manage actors |
-| `resource add/list` | Manage resources |
-| `reschedule` | Set not_before timestamp |
-| `coordinate` | Parallel dispatch status |
+Need to stop mid-task:
+```bash
+wg unclaim <task-id>
+```
 
-All commands support `--json` for machine output.
+### Discovering new work
+
+Add tasks as you discover them:
+```bash
+wg add "New task title" --blocked-by current-task
+```
+
+Check impact:
+```bash
+wg impact <task-id>  # what depends on this?
+```
+
+## Planning work
+
+Break down a goal:
+```bash
+wg add "Goal: Ship the feature"
+wg add "Design the API"
+wg add "Implement backend" --blocked-by design-the-api
+wg add "Write tests" --blocked-by implement-backend
+wg add "Update docs" --blocked-by implement-backend
+```
+
+Add metadata:
+```bash
+wg add "Complex task" \
+  --hours 4 \
+  --skill rust \
+  --deliverable src/feature.rs \
+  --blocked-by prerequisite-task
+```
+
+Check the plan:
+```bash
+wg critical-path  # longest chain
+wg bottlenecks    # what to prioritize
+wg forecast       # when will it be done?
+```
+
+## Analysis commands
+
+| Command | What it tells you |
+|---------|-------------------|
+| `wg ready` | Tasks you can work on now |
+| `wg list` | All tasks with status |
+| `wg show <id>` | Full task details |
+| `wg why-blocked <id>` | Why can't this start? |
+| `wg impact <id>` | What depends on this? |
+| `wg bottlenecks` | Highest-impact tasks |
+| `wg critical-path` | Longest dependency chain |
+| `wg forecast` | Completion estimate |
+| `wg analyze` | Full health report |
+| `wg context <id>` | Available inputs |
+| `wg trajectory <id>` | Optimal claim order |
+
+## Key behaviors
+
+1. **Always claim before working** - prevents conflicts with other agents
+2. **Log as you go** - helps recovery if interrupted
+3. **Mark done immediately** - unblocks dependent tasks
+4. **Add tasks as you discover them** - keep the graph current
+5. **Check `wg ready` after completing** - see what's unblocked
+
+## Multi-agent coordination
+
+If multiple agents are working:
+- Claims are atomic (no double-work)
+- Use `wg coordinate` to see parallel opportunities
+- Each agent should have a unique actor ID
+
+## All commands
+
+```
+wg init              # start a workgraph
+wg add <title>       # create task
+wg done <id>         # complete task
+wg fail <id>         # mark failed
+wg abandon <id>      # give up on task
+wg retry <id>        # retry failed task
+wg claim <id>        # take a task
+wg unclaim <id>      # release a task
+wg reclaim <id>      # take from dead agent
+wg log <id> <msg>    # add progress note
+wg show <id>         # task details
+wg list              # all tasks
+wg ready             # available tasks
+wg blocked <id>      # direct blockers
+wg why-blocked <id>  # full blocker chain
+wg impact <id>       # dependents
+wg context <id>      # available inputs
+wg trajectory <id>   # optimal claim order
+wg bottlenecks       # high-impact tasks
+wg critical-path     # longest chain
+wg forecast          # completion estimate
+wg velocity          # completion rate
+wg aging             # task age distribution
+wg workload          # actor assignments
+wg analyze           # health report
+wg actor add <id>    # register actor
+wg actor list        # list actors
+wg artifact <id> <p> # record output
+wg exec <id>         # run task command
+wg agent --actor <x> # autonomous loop
+wg config            # view/set config
+```
+
+All commands support `--json` for structured output.
