@@ -88,36 +88,60 @@ wg claim set-up-ci-pipeline --actor erik
 wg done set-up-ci-pipeline       # unblocks deploy-to-staging
 ```
 
-## Using with Claude Code
+## Using with AI Coding Assistants
 
-Add this to your project's `CLAUDE.md`:
+Workgraph includes a skill definition that teaches AI assistants the full protocol. The skill lives at `.claude/skills/wg.md` in this repo.
 
-```markdown
-## Task Coordination
+### Claude Code
 
-This project uses workgraph for task management. Follow this protocol:
+Copy the skill to your project:
 
-### Before starting work
-1. Run `wg ready` to see available tasks
-2. Run `wg claim <task-id> --actor claude` to claim one
-3. Run `wg show <task-id>` for full details
-4. Run `wg context <task-id>` to see available inputs from dependencies
-
-### While working
-- Log progress: `wg log <task-id> "Did X, working on Y"`
-- If you produce output files: `wg artifact <task-id> path/to/file`
-
-### When done
-- Success: `wg done <task-id>`
-- Failed: `wg fail <task-id> --reason "why"`
-- Need to stop: `wg unclaim <task-id>`
-
-### If you discover new work
-- Add it: `wg add "New task" --blocked-by current-task`
-- Check impact: `wg impact <task-id>`
+```bash
+mkdir -p .claude/skills
+cp /path/to/workgraph/.claude/skills/wg.md .claude/skills/
 ```
 
-When you start a Claude Code session, it'll follow this protocol automatically.
+Then add to your `CLAUDE.md`:
+
+```markdown
+Use workgraph for task management.
+```
+
+Claude Code will automatically load the skill and follow the protocol.
+
+### OpenCode / Codex / Other Agents
+
+These systems typically use `AGENTS.md` for instructions. Copy the skill content into your `AGENTS.md`:
+
+```bash
+cat /path/to/workgraph/.claude/skills/wg.md >> AGENTS.md
+```
+
+Or just add the core instruction:
+
+```markdown
+## Task Management
+
+Use workgraph (`wg`) for task coordination:
+- `wg ready` to see available tasks
+- `wg claim <task> --actor <name>` before working
+- `wg done <task>` when complete
+- `wg fail <task> --reason "..."` if blocked
+
+See `wg --help` for all commands.
+```
+
+### What the skill teaches
+
+The full skill covers:
+- When to use workgraph (multi-step projects, cross-session work, coordination)
+- The claim/work/done protocol
+- Progress logging and artifact tracking
+- Planning with dependencies
+- Analysis commands for project health
+- Multi-agent coordination rules
+
+It's designed to be self-contained - an agent can read it and immediately know how to participate.
 
 ## Agentic workflows
 
