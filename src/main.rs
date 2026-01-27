@@ -346,16 +346,21 @@ enum Commands {
         task: String,
     },
 
-    /// Record actor heartbeat or check for stale actors
+    /// Record actor/agent heartbeat or check for stale actors/agents
     Heartbeat {
-        /// Actor ID to record heartbeat for (omit to check status)
+        /// Actor or agent ID to record heartbeat for (omit to check status)
+        /// Agent IDs start with "agent-" (e.g., agent-1, agent-7)
         actor: Option<String>,
 
         /// Check for stale actors (no heartbeat within threshold)
         #[arg(long)]
         check: bool,
 
-        /// Minutes without heartbeat before actor is considered stale (default: 5)
+        /// Check for stale agents instead of actors
+        #[arg(long)]
+        agents: bool,
+
+        /// Minutes without heartbeat before actor/agent is considered stale (default: 5)
         #[arg(long, default_value = "5")]
         threshold: u64,
     },
@@ -710,12 +715,18 @@ fn main() -> Result<()> {
         Commands::Heartbeat {
             actor,
             check,
+            agents,
             threshold,
         } => {
             if check || actor.is_none() {
-                commands::heartbeat::run_check(&workgraph_dir, threshold, cli.json)
+                if agents {
+                    commands::heartbeat::run_check_agents(&workgraph_dir, threshold, cli.json)
+                } else {
+                    commands::heartbeat::run_check(&workgraph_dir, threshold, cli.json)
+                }
             } else {
-                commands::heartbeat::run(&workgraph_dir, actor.as_deref().unwrap())
+                // Use run_auto to automatically detect agent vs actor
+                commands::heartbeat::run_auto(&workgraph_dir, actor.as_deref().unwrap())
             }
         }
         Commands::Artifact { task, path, remove } => {
