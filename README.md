@@ -90,31 +90,35 @@ wg done set-up-ci-pipeline       # unblocks deploy-to-staging
 
 ## Using with AI Coding Assistants
 
-Workgraph includes a skill definition that teaches AI assistants the full protocol. The skill lives at `.claude/skills/wg.md` in this repo.
+Workgraph includes a skill definition that teaches AI assistants the full protocol.
 
 ### Claude Code
 
-Copy the skill to your project:
+Copy the skill directory to your project or personal skills:
 
 ```bash
+# Project-specific (this project only)
 mkdir -p .claude/skills
-cp /path/to/workgraph/.claude/skills/wg.md .claude/skills/
+cp -r /path/to/workgraph/.claude/skills/wg .claude/skills/
+
+# Or personal (all projects)
+cp -r /path/to/workgraph/.claude/skills/wg ~/.claude/skills/
 ```
 
-Then add to your `CLAUDE.md`:
+The skill has proper YAML frontmatter so Claude Code auto-detects when to use it. You can also invoke it explicitly with `/wg`.
+
+Optionally add to your `CLAUDE.md`:
 
 ```markdown
 Use workgraph for task management.
 ```
 
-Claude Code will automatically load the skill and follow the protocol.
-
 ### OpenCode / Codex / Other Agents
 
-These systems typically use `AGENTS.md` for instructions. Copy the skill content into your `AGENTS.md`:
+These systems typically use `AGENTS.md` for instructions. Copy the skill content:
 
 ```bash
-cat /path/to/workgraph/.claude/skills/wg.md >> AGENTS.md
+cat /path/to/workgraph/.claude/skills/wg/SKILL.md >> AGENTS.md
 ```
 
 Or just add the core instruction:
@@ -139,6 +143,7 @@ The full skill covers:
 - Progress logging and artifact tracking
 - Planning with dependencies
 - Analysis commands for project health
+- Agent service (spawn, kill, monitoring)
 - Multi-agent coordination rules
 
 It's designed to be self-contained - an agent can read it and immediately know how to participate.
