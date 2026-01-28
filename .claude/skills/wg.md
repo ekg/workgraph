@@ -136,6 +136,139 @@ If multiple agents are working:
 - Use `wg coordinate` to see parallel opportunities
 - Each agent should have a unique actor ID
 
+## Agent Service
+
+Automated agent spawning and management for parallel task execution.
+
+### When to use spawn vs manual claim
+
+Use `wg spawn` when:
+- Running multiple agents in parallel
+- Need automatic output capture
+- Want heartbeat monitoring and dead agent detection
+- Automating a coordinator pattern
+
+Use manual `wg claim` when:
+- Working interactively on a single task
+- Don't need process management
+- Testing or debugging
+
+### Spawning agents
+
+```bash
+wg spawn <task-id> --executor <name> [--timeout <duration>]
+```
+
+Spawns an agent process to work on a task:
+1. Claims the task (fails if already claimed)
+2. Loads executor config from `.workgraph/executors/<name>.toml`
+3. Starts the executor process with task context
+4. Registers agent in the registry
+5. Returns immediately (doesn't wait for completion)
+
+```bash
+wg spawn implement-feature --executor claude
+# Spawned agent-7 for task 'implement-feature'
+#   Executor: claude
+#   PID: 54321
+#   Output: .workgraph/agents/agent-7/output.log
+```
+
+### Monitoring agents
+
+```bash
+wg agents                # List all agents
+wg agents --alive        # Only running agents
+wg agents --dead         # Only dead agents
+wg agents --working      # Actively working
+wg agents --idle         # Idle agents
+wg agents --json         # JSON for scripting
+```
+
+Output shows agent ID, task, executor, PID, uptime, and status.
+
+### Terminating agents
+
+```bash
+wg kill <agent-id>       # Graceful (SIGTERM, wait, SIGKILL)
+wg kill <agent-id> --force  # Immediate SIGKILL
+wg kill --all            # Kill all running agents
+```
+
+Killing an agent automatically unclaims its task.
+
+### Dead agent detection
+
+Agents send heartbeats. When heartbeats stop, agents are marked dead.
+
+```bash
+wg dead-agents --check              # Check for dead agents (read-only)
+wg dead-agents --cleanup            # Mark dead and unclaim their tasks
+wg dead-agents --remove             # Remove dead agents from registry
+wg dead-agents --threshold 10       # Custom timeout in minutes
+```
+
+### Service daemon
+
+Optional background daemon for centralized agent management:
+
+```bash
+wg service start         # Start daemon
+wg service stop          # Stop daemon
+wg service stop --force  # Stop and kill all agents
+wg service status        # Show daemon status and agent summary
+```
+
+The daemon:
+- Accepts spawn requests via Unix socket
+- Monitors agent health periodically
+- Automatically detects dead agents
+
+### Executor configuration
+
+Executors define how agents run. Place configs in `.workgraph/executors/`:
+
+**Claude executor** (`claude.toml`):
+```toml
+[executor]
+type = "claude"
+command = "claude"
+args = ["--print", "--dangerously-skip-permissions"]
+
+[executor.prompt_template]
+template = """
+Working on: {{task_id}} - {{task_title}}
+{{task_description}}
+
+Context: {{task_context}}
+
+When done: wg done {{task_id}}
+"""
+```
+
+**Shell executor** (`shell.toml`) - uses task's `exec` field:
+```toml
+[executor]
+type = "shell"
+command = "bash"
+```
+
+### Coordinator pattern
+
+Automate parallel task execution:
+
+```bash
+while true; do
+    READY=$(wg ready --json | jq -r '.[].id')
+    [ -z "$READY" ] && { sleep 10; continue; }
+
+    for TASK in $READY; do
+        wg spawn "$TASK" --executor claude
+    done
+    sleep 30
+done
+```
+
 ## All commands
 
 ```
@@ -170,6 +303,13 @@ wg artifact <id> <p> # record output
 wg exec <id>         # run task command
 wg agent --actor <x> # autonomous loop
 wg config            # view/set config
+wg spawn <id>        # spawn agent for task
+wg agents            # list running agents
+wg kill <agent-id>   # terminate agent
+wg service start     # start service daemon
+wg service stop      # stop service daemon
+wg service status    # daemon status
+wg dead-agents       # dead agent detection
 ```
 
 All commands support `--json` for structured output.
