@@ -94,31 +94,22 @@ Workgraph includes a skill definition that teaches AI assistants the full protoc
 
 ### Claude Code
 
-Copy the skill directory to your project or personal skills:
+From the workgraph directory, install the skill:
 
 ```bash
-# Project-specific (this project only)
-mkdir -p .claude/skills
-cp -r /path/to/workgraph/.claude/skills/wg .claude/skills/
+# Personal (all your projects)
+cp -r .claude/skills/wg ~/.claude/skills/
 
-# Or personal (all projects)
-cp -r /path/to/workgraph/.claude/skills/wg ~/.claude/skills/
+# Or project-specific
+cp -r .claude/skills/wg /path/to/your-project/.claude/skills/
 ```
 
-The skill has proper YAML frontmatter so Claude Code auto-detects when to use it. You can also invoke it explicitly with `/wg`.
-
-Optionally add to your `CLAUDE.md`:
-
-```markdown
-Use workgraph for task management.
-```
+The skill has YAML frontmatter so Claude auto-detects when to use it. You can also invoke explicitly with `/wg`.
 
 ### OpenCode / Codex / Other Agents
 
-These systems typically use `AGENTS.md` for instructions. Copy the skill content:
-
 ```bash
-cat /path/to/workgraph/.claude/skills/wg/SKILL.md >> AGENTS.md
+cat .claude/skills/wg/SKILL.md >> /path/to/your-project/AGENTS.md
 ```
 
 Or just add the core instruction:
