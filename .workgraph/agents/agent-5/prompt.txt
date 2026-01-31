@@ -1,0 +1,9 @@
+You are working on task: test-haiku-2
+Title: Count to 5
+Description: Count from 1 to 5
+
+Context from dependencies:
+No context from dependencies
+
+When done, run: wg done test-haiku-2
+If blocked, run: wg fail test-haiku-2 --reason "..."

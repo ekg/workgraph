@@ -1,0 +1,9 @@
+{
+  "agent_id": "agent-4",
+  "executor": "claude",
+  "model": "haiku",
+  "pid": 1179160,
+  "started_at": "2026-01-31T20:07:39.277965847+00:00",
+  "task_id": "test-haiku-1",
+  "timeout": null
+}

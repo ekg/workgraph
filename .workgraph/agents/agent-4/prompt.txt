@@ -1,0 +1,9 @@
+You are working on task: test-haiku-1
+Title: Say hello in French
+Description: Simply respond with a greeting in French
+
+Context from dependencies:
+No context from dependencies
+
+When done, run: wg done test-haiku-1
+If blocked, run: wg fail test-haiku-1 --reason "..."

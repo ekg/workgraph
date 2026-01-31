@@ -1,0 +1,35 @@
+{
+  "agents": {
+    "agent-5": {
+      "id": "agent-5",
+      "pid": 1184953,
+      "task_id": "test-haiku-2",
+      "executor": "claude",
+      "started_at": "2026-01-31T20:08:08.213170897+00:00",
+      "last_heartbeat": "2026-01-31T20:08:08.213170897+00:00",
+      "status": "starting",
+      "output_file": ".workgraph/agents/agent-5/output.log"
+    },
+    "agent-4": {
+      "id": "agent-4",
+      "pid": 1179160,
+      "task_id": "test-haiku-1",
+      "executor": "claude",
+      "started_at": "2026-01-31T20:07:39.276900177+00:00",
+      "last_heartbeat": "2026-01-31T20:07:39.276900177+00:00",
+      "status": "starting",
+      "output_file": ".workgraph/agents/agent-4/output.log"
+    },
+    "agent-6": {
+      "id": "agent-6",
+      "pid": 1184957,
+      "task_id": "test-haiku-3",
+      "executor": "claude",
+      "started_at": "2026-01-31T20:08:08.223494337+00:00",
+      "last_heartbeat": "2026-01-31T20:08:08.223494337+00:00",
+      "status": "starting",
+      "output_file": ".workgraph/agents/agent-6/output.log"
+    }
+  },
+  "next_agent_id": 7
+}

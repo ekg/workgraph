@@ -1,0 +1,9 @@
+You are working on task: test-haiku-3
+Title: Name 3 colors
+Description: List 3 colors
+
+Context from dependencies:
+No context from dependencies
+
+When done, run: wg done test-haiku-3
+If blocked, run: wg fail test-haiku-3 --reason "..."
