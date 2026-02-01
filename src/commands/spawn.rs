@@ -832,4 +832,142 @@ mod tests {
         let context = build_task_context(&graph, &task);
         assert_eq!(context, "No context from dependencies");
     }
+
+    #[test]
+    fn test_wrapper_script_generation_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("echo hello".to_string());
+        task.verify = None; // Not verified, should use wg done
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script was created in agents directory
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        assert!(wrapper_path.exists(), "Wrapper script not found at {:?}", wrapper_path);
+
+        // Read wrapper script and verify it contains the expected auto-complete logic
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+        assert!(script.contains("TASK_ID=\"t1\""));
+        assert!(script.contains("wg done \"$TASK_ID\""));
+        assert!(script.contains("[wrapper] Agent exited successfully, marking task done"));
+        assert!(script.contains("TASK_STATUS=$(wg show"));
+        assert!(script.contains("if [ \"$TASK_STATUS\" = \"in_progress\" ]"));
+    }
+
+    #[test]
+    fn test_wrapper_script_for_verified_task() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("echo hello".to_string());
+        task.verify = Some("manual".to_string()); // Verified, should use wg submit
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script was created in agents directory
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        assert!(wrapper_path.exists(), "Wrapper script not found at {:?}", wrapper_path);
+
+        // Read wrapper script and verify it uses submit for verified tasks
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+        assert!(script.contains("wg submit \"$TASK_ID\""));
+        assert!(script.contains("[wrapper] Agent exited successfully, submitting for review"));
+    }
+
+    #[test]
+    fn test_wrapper_handles_agent_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("exit 1".to_string()); // Will fail
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script was created in agents directory
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        assert!(wrapper_path.exists(), "Wrapper script not found at {:?}", wrapper_path);
+
+        // Read wrapper script and verify it handles failure
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+        assert!(script.contains("wg fail \"$TASK_ID\""));
+        assert!(script.contains("[wrapper] Agent exited with code"));
+    }
+
+    #[test]
+    fn test_wrapper_detects_task_status() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("wg done t1".to_string()); // Agent marks it done
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script detects if task already done by agent
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+
+        // Should check task status with wg show
+        assert!(script.contains("TASK_STATUS=$(wg show \"$TASK_ID\" --json"));
+
+        // Should only auto-complete if still in_progress
+        assert!(script.contains("if [ \"$TASK_STATUS\" = \"in_progress\" ]"));
+    }
+
+    #[test]
+    fn test_wrapper_script_preserves_exit_code() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("exit 42".to_string()); // Specific exit code
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script preserves exit code
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+
+        // Should capture and preserve EXIT_CODE
+        assert!(script.contains("EXIT_CODE=$?"));
+        assert!(script.contains("exit $EXIT_CODE"));
+    }
+
+    #[test]
+    fn test_wrapper_appends_output_to_log() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("echo 'Agent output'".to_string());
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script appends to output file
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+
+        // Should redirect agent output to output file
+        assert!(script.contains(">> \"$OUTPUT_FILE\" 2>&1"));
+
+        // Should append status messages
+        assert!(script.contains("echo \"\" >> \"$OUTPUT_FILE\""));
+        assert!(script.contains("[wrapper]"));
+    }
+
+    #[test]
+    fn test_wrapper_suppresses_wg_command_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut task = make_task("t1", "Test Task");
+        task.exec = Some("true".to_string());
+        setup_graph(temp_dir.path(), vec![task]);
+
+        run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
+
+        // Check wrapper script suppresses wg command errors
+        let wrapper_path = agent_output_dir(temp_dir.path(), "agent-1").join("run.sh");
+        let script = fs::read_to_string(&wrapper_path).unwrap();
+
+        // Should suppress errors with 2>> redirection and || true
+        assert!(script.contains("2>> \"$OUTPUT_FILE\" || true"));
+    }
 }

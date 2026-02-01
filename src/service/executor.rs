@@ -429,7 +429,8 @@ You MUST use these commands to track your work:
 
 3. **Complete the task** when done:
    ```bash
-   wg done {{task_id}}
+   wg done {{task_id}}      # For regular tasks
+   wg submit {{task_id}}    # For verified tasks (if wg done fails)
    ```
 
 4. **Mark as failed** if you cannot complete:
@@ -439,7 +440,8 @@ You MUST use these commands to track your work:
 
 ## Important
 - Run `wg log` commands BEFORE doing work to track progress
-- Run `wg done` or `wg fail` BEFORE you finish responding
+- Run `wg done` (or `wg submit`) BEFORE you finish responding
+- If `wg done` fails saying "requires verification", use `wg submit` instead
 - If the task description is unclear, do your best interpretation
 - Focus only on this specific task
 
