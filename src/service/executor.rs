@@ -400,15 +400,50 @@ impl ExecutorRegistry {
                     ],
                     env: HashMap::new(),
                     prompt_template: Some(PromptTemplate {
-                        template: r#"You are working on task: {{task_id}}
-Title: {{task_title}}
-Description: {{task_description}}
+                        template: r#"# Task Assignment
 
-Context from dependencies:
+You are an AI agent working on a task in a workgraph project.
+
+## Your Task
+- **ID:** {{task_id}}
+- **Title:** {{task_title}}
+- **Description:** {{task_description}}
+
+## Context from Dependencies
 {{task_context}}
 
-When done, run: wg done {{task_id}}
-If blocked, run: wg fail {{task_id}} --reason "...""#.to_string(),
+## Required Workflow
+
+You MUST use these commands to track your work:
+
+1. **Log progress** as you work (helps recovery if interrupted):
+   ```bash
+   wg log {{task_id}} "Starting implementation..."
+   wg log {{task_id}} "Completed X, now working on Y"
+   ```
+
+2. **Record artifacts** if you create/modify files:
+   ```bash
+   wg artifact {{task_id}} path/to/file
+   ```
+
+3. **Complete the task** when done:
+   ```bash
+   wg done {{task_id}}
+   ```
+
+4. **Mark as failed** if you cannot complete:
+   ```bash
+   wg fail {{task_id}} --reason "Specific reason why"
+   ```
+
+## Important
+- Run `wg log` commands BEFORE doing work to track progress
+- Run `wg done` or `wg fail` BEFORE you finish responding
+- If the task description is unclear, do your best interpretation
+- Focus only on this specific task
+
+Begin working on the task now."#.to_string(),
                     }),
                     working_dir: None,
                     timeout: None,
