@@ -581,6 +581,17 @@ pub fn run_daemon(dir: &Path, socket_path: &str, cli_max_agents: Option<usize>, 
         daemon_cfg.model.as_deref().unwrap_or("default"),
     ));
 
+    // Aggregate usage stats on startup
+    match workgraph::usage::aggregate_usage_stats(&dir) {
+        Ok(count) if count > 0 => {
+            logger.info(&format!("Aggregated {} usage log entries on startup", count));
+        }
+        Ok(_) => {} // No entries to aggregate
+        Err(e) => {
+            logger.warn(&format!("Failed to aggregate usage stats: {}", e));
+        }
+    }
+
     // Initialize coordinator state on disk
     let mut coord_state = CoordinatorState {
         enabled: true,
@@ -632,6 +643,18 @@ pub fn run_daemon(dir: &Path, socket_path: &str, cli_max_agents: Option<usize>, 
         // The fast-path is GraphChanged IPC which resets last_coordinator_tick.
         if last_coordinator_tick.elapsed() >= daemon_cfg.poll_interval {
             last_coordinator_tick = Instant::now();
+
+            // Aggregate usage stats periodically
+            match workgraph::usage::aggregate_usage_stats(&dir) {
+                Ok(count) if count > 0 => {
+                    logger.info(&format!("Aggregated {} usage log entries", count));
+                }
+                Ok(_) => {} // No entries to aggregate
+                Err(e) => {
+                    logger.warn(&format!("Failed to aggregate usage stats: {}", e));
+                }
+            }
+
             logger.info(&format!(
                 "Coordinator tick #{} starting (max_agents={}, executor={})",
                 coord_state.ticks + 1, daemon_cfg.max_agents, &daemon_cfg.executor

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::path::PathBuf;
 
 mod commands;
@@ -9,6 +9,8 @@ mod tui;
 #[command(name = "wg")]
 #[command(about = "Workgraph - A lightweight work coordination graph")]
 #[command(version)]
+#[command(disable_help_flag = true)]
+#[command(disable_help_subcommand = true)]
 struct Cli {
     /// Path to the workgraph directory (default: .workgraph in current dir)
     #[arg(long, global = true)]
@@ -18,8 +20,20 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Show help (use --help-all for full command list)
+    #[arg(long, short = 'h', global = true)]
+    help: bool,
+
+    /// Show all commands in help output
+    #[arg(long, global = true)]
+    help_all: bool,
+
+    /// Sort help output alphabetically
+    #[arg(long, short = 'a', global = true)]
+    alphabetical: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -916,12 +930,231 @@ enum MatrixCommands {
     Logout,
 }
 
+/// Print custom help output with usage-based ordering
+fn print_help(dir: &PathBuf, show_all: bool, alphabetical: bool) {
+    use workgraph::config::Config;
+    use workgraph::usage::{self, MAX_HELP_COMMANDS};
+
+    // Get subcommand definitions from clap
+    let cmd = Cli::command();
+    let subcommands: Vec<_> = cmd.get_subcommands()
+        .filter(|c| !c.is_hide_set())
+        .map(|c| {
+            let name = c.get_name().to_string();
+            let about = c.get_about().map(|s| s.to_string()).unwrap_or_default();
+            (name, about)
+        })
+        .collect();
+
+    // Load config for ordering preference
+    let config = Config::load(dir).unwrap_or_default();
+    let use_alphabetical = alphabetical || config.help.ordering == "alphabetical";
+
+    println!("wg - workgraph task management\n");
+
+    if use_alphabetical {
+        // Simple alphabetical listing
+        let mut sorted = subcommands.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let to_show = if show_all { sorted.len() } else { MAX_HELP_COMMANDS.min(sorted.len()) };
+        println!("Commands:");
+        for (name, about) in sorted.iter().take(to_show) {
+            println!("  {:15} {}", name, about);
+        }
+        if !show_all && sorted.len() > MAX_HELP_COMMANDS {
+            println!("  ... and {} more (--help-all)", sorted.len() - MAX_HELP_COMMANDS);
+        }
+    } else if config.help.ordering == "curated" || usage::load_command_order(dir).is_none() {
+        // Use curated default ordering
+        let mut shown = std::collections::HashSet::new();
+        let to_show = if show_all { subcommands.len() } else { MAX_HELP_COMMANDS.min(subcommands.len()) };
+
+        println!("Commands:");
+        let mut count = 0;
+
+        // First show commands in curated order
+        for &default_cmd in usage::DEFAULT_ORDER {
+            if count >= to_show {
+                break;
+            }
+            if let Some((name, about)) = subcommands.iter().find(|(n, _)| n == default_cmd) {
+                println!("  {:15} {}", name, about);
+                shown.insert(name.clone());
+                count += 1;
+            }
+        }
+
+        // Then show remaining alphabetically
+        let mut remaining: Vec<_> = subcommands.iter()
+            .filter(|(n, _)| !shown.contains(n))
+            .collect();
+        remaining.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (name, about) in remaining {
+            if count >= to_show {
+                break;
+            }
+            println!("  {:15} {}", name, about);
+            count += 1;
+        }
+
+        if !show_all && subcommands.len() > MAX_HELP_COMMANDS {
+            println!("  ... and {} more (--help-all)", subcommands.len() - MAX_HELP_COMMANDS);
+        }
+    } else {
+        // Use personalized usage-based ordering with tiers
+        let usage_data = usage::load_command_order(dir).unwrap();
+        let (frequent, occasional, rare) = usage::group_by_tier(&usage_data);
+
+        let mut shown = 0;
+        let max_show = if show_all { subcommands.len() } else { MAX_HELP_COMMANDS };
+
+        // Helper to print commands in a tier
+        let mut print_tier = |title: &str, tier_cmds: &[&str]| {
+            if tier_cmds.is_empty() || shown >= max_show {
+                return;
+            }
+            println!("{}:", title);
+            for &cmd_name in tier_cmds {
+                if shown >= max_show {
+                    break;
+                }
+                if let Some((_, about)) = subcommands.iter().find(|(n, _)| n == cmd_name) {
+                    println!("  {:15} {}", cmd_name, about);
+                    shown += 1;
+                }
+            }
+            println!();
+        };
+
+        print_tier("Your most-used", &frequent);
+        print_tier("Also used", &occasional);
+
+        if show_all {
+            print_tier("Less common", &rare);
+        } else if shown < max_show && !rare.is_empty() {
+            let remaining = max_show - shown;
+            let to_show: Vec<&str> = rare.iter().take(remaining).copied().collect();
+            if !to_show.is_empty() {
+                println!("More commands:");
+                for &cmd_name in &to_show {
+                    if let Some((_, about)) = subcommands.iter().find(|(n, _)| n == cmd_name) {
+                        println!("  {:15} {}", cmd_name, about);
+                    }
+                }
+            }
+        }
+
+        let total_cmds = frequent.len() + occasional.len() + rare.len();
+        if !show_all && total_cmds > MAX_HELP_COMMANDS {
+            // Count commands we didn't show
+            let unshown: usize = subcommands.iter()
+                .filter(|(n, _)| {
+                    !frequent.contains(&n.as_str())
+                    && !occasional.contains(&n.as_str())
+                    && !rare.iter().take(max_show - frequent.len() - occasional.len()).any(|&r| r == n.as_str())
+                })
+                .count();
+            if unshown > 0 {
+                println!("  ... and {} more (--help-all)", unshown);
+            }
+        }
+    }
+
+    println!("\nOptions:");
+    println!("  -d, --dir <PATH>    Workgraph directory [default: .workgraph]");
+    println!("  -h, --help          Print help (--help-all for all commands)");
+    println!("      --alphabetical  Sort commands alphabetically");
+    println!("      --json          Output as JSON");
+    println!("  -V, --version       Print version");
+}
+
+/// Get the command name from a Commands enum variant for usage tracking
+fn command_name(cmd: &Commands) -> &'static str {
+    match cmd {
+        Commands::Init => "init",
+        Commands::Add { .. } => "add",
+        Commands::Done { .. } => "done",
+        Commands::Submit { .. } => "submit",
+        Commands::Approve { .. } => "approve",
+        Commands::Reject { .. } => "reject",
+        Commands::Fail { .. } => "fail",
+        Commands::Abandon { .. } => "abandon",
+        Commands::Retry { .. } => "retry",
+        Commands::Claim { .. } => "claim",
+        Commands::Unclaim { .. } => "unclaim",
+        Commands::Reclaim { .. } => "reclaim",
+        Commands::Ready => "ready",
+        Commands::Blocked { .. } => "blocked",
+        Commands::WhyBlocked { .. } => "why-blocked",
+        Commands::Check => "check",
+        Commands::List { .. } => "list",
+        Commands::Graph { .. } => "graph",
+        Commands::Cost { .. } => "cost",
+        Commands::Coordinate { .. } => "coordinate",
+        Commands::Plan { .. } => "plan",
+        Commands::Reschedule { .. } => "reschedule",
+        Commands::Impact { .. } => "impact",
+        Commands::Loops => "loops",
+        Commands::Structure => "structure",
+        Commands::Bottlenecks => "bottlenecks",
+        Commands::Velocity { .. } => "velocity",
+        Commands::Aging => "aging",
+        Commands::Forecast => "forecast",
+        Commands::Workload => "workload",
+        Commands::Resources => "resources",
+        Commands::CriticalPath => "critical-path",
+        Commands::Analyze => "analyze",
+        Commands::Archive { .. } => "archive",
+        Commands::Show { .. } => "show",
+        Commands::Log { .. } => "log",
+        Commands::Viz { .. } => "viz",
+        Commands::Resource { .. } => "resource",
+        Commands::Actor { .. } => "actor",
+        Commands::Skill { .. } => "skill",
+        Commands::Match { .. } => "match",
+        Commands::Heartbeat { .. } => "heartbeat",
+        Commands::Artifact { .. } => "artifact",
+        Commands::Context { .. } => "context",
+        Commands::Next { .. } => "next",
+        Commands::Trajectory { .. } => "trajectory",
+        Commands::Exec { .. } => "exec",
+        Commands::Agent { .. } => "agent",
+        Commands::Spawn { .. } => "spawn",
+        Commands::Coordinator { .. } => "coordinator",
+        Commands::Config { .. } => "config",
+        Commands::DeadAgents { .. } => "dead-agents",
+        Commands::Agents { .. } => "agents",
+        Commands::Kill { .. } => "kill",
+        Commands::Service { .. } => "service",
+        Commands::Tui { .. } => "tui",
+        Commands::Quickstart => "quickstart",
+        Commands::Status => "status",
+        #[cfg(any(feature = "matrix", feature = "matrix-lite"))]
+        Commands::Notify { .. } => "notify",
+        #[cfg(any(feature = "matrix", feature = "matrix-lite"))]
+        Commands::Matrix { .. } => "matrix",
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let workgraph_dir = cli.dir.unwrap_or_else(|| PathBuf::from(".workgraph"));
 
-    match cli.command {
+    // Handle help flags
+    if cli.help || cli.help_all || cli.command.is_none() {
+        print_help(&workgraph_dir, cli.help_all, cli.alphabetical);
+        return Ok(());
+    }
+
+    let command = cli.command.unwrap();
+
+    // Track command usage (fire-and-forget, ignores errors)
+    workgraph::usage::append_usage_log(&workgraph_dir, command_name(&command));
+
+    match command {
         Commands::Init => commands::init::run(&workgraph_dir),
         Commands::Add {
             title,

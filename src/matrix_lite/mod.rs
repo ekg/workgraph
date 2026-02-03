@@ -163,6 +163,41 @@ impl MatrixClient {
         Self::save_access_token_static(&self.state_dir(), &self.access_token);
     }
 
+    /// Create a new client by logging in with password (ignores cached/config tokens)
+    pub async fn login_with_password(workgraph_dir: &Path, config: &MatrixConfig) -> Result<Self> {
+        let homeserver_url = config
+            .homeserver_url
+            .as_ref()
+            .context("homeserver_url is required")?
+            .trim_end_matches('/')
+            .to_string();
+
+        let user_id = config.username.as_ref().context("username is required")?.clone();
+        let password = config.password.as_ref().context("password is required for login")?;
+
+        let state_dir = workgraph_dir.join(MATRIX_STATE_DIR);
+        std::fs::create_dir_all(&state_dir)?;
+
+        let http = HttpClient::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()?;
+
+        // Force login with password, ignoring any cached or config tokens
+        let access_token = Self::login(&http, &homeserver_url, &user_id, password).await?;
+        Self::save_access_token_static(&state_dir, &access_token);
+
+        let sync_token = Self::load_sync_token(&state_dir);
+
+        Ok(Self {
+            http,
+            homeserver_url,
+            access_token,
+            user_id,
+            workgraph_dir: workgraph_dir.to_path_buf(),
+            sync_token,
+        })
+    }
+
     /// Clear cached credentials (forces re-login on next use)
     pub fn clear_cache(workgraph_dir: &Path) {
         let state_dir = workgraph_dir.join(MATRIX_STATE_DIR);

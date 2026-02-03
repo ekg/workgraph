@@ -11,12 +11,13 @@ pub mod matrix;
 #[cfg(feature = "matrix-lite")]
 pub mod matrix_lite;
 pub mod service;
+pub mod usage;
 
 pub use graph::{WorkGraph, Node, NodeKind, Task, Actor, ActorType, Resource, Estimate, ResponseTime};
 pub use parser::{load_graph, save_graph};
 pub use query::{ready_tasks, blocked_by, cost_of};
 pub use check::{check_cycles, check_orphans, CheckResult};
-pub use config::{Config, MatrixConfig};
+pub use config::{Config, HelpConfig, MatrixConfig};
 pub use service::{
     AgentHandle, AgentEntry, AgentRegistry, AgentStatus, ClaudeExecutor, ClaudeExecutorConfig,
     DefaultExecutor, Executor, ExecutorConfig, ExecutorRegistry, ExecutorSettings, LockedRegistry,

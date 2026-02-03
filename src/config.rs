@@ -24,6 +24,30 @@ pub struct Config {
     /// Project metadata
     #[serde(default)]
     pub project: ProjectConfig,
+
+    /// Help display configuration
+    #[serde(default)]
+    pub help: HelpConfig,
+}
+
+/// Help display configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HelpConfig {
+    /// Command ordering: "usage" (default), "alphabetical", or "curated"
+    #[serde(default = "default_help_ordering")]
+    pub ordering: String,
+}
+
+fn default_help_ordering() -> String {
+    "usage".to_string()
+}
+
+impl Default for HelpConfig {
+    fn default() -> Self {
+        Self {
+            ordering: default_help_ordering(),
+        }
+    }
 }
 
 /// Agent-specific configuration

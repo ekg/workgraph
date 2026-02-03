@@ -195,11 +195,12 @@ pub fn run_login(dir: &Path) -> Result<()> {
         );
     }
 
-    if matrix_config.password.is_none() && matrix_config.access_token.is_none() {
+    if matrix_config.password.is_none() {
         anyhow::bail!(
-            "No password or access_token configured.\n\n\
+            "No password configured. The 'login' command requires a password.\n\n\
              Add to ~/.config/workgraph/matrix.toml:\n\
-             password = \"your_password\""
+             password = \"your_password\"\n\n\
+             (You can remove access_token after adding password)"
         );
     }
 
@@ -209,7 +210,8 @@ pub fn run_login(dir: &Path) -> Result<()> {
     let rt = Runtime::new().context("Failed to create async runtime")?;
 
     rt.block_on(async {
-        let mut client = MatrixClient::new(dir, &matrix_config)
+        // Force password login by using login_with_password directly
+        let mut client = MatrixClient::login_with_password(dir, &matrix_config)
             .await
             .context("Login failed")?;
 
