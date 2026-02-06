@@ -301,17 +301,16 @@ pub struct TickResult {
 pub fn coordinator_tick(dir: &Path, max_agents: usize, executor: &str, model: Option<&str>) -> Result<TickResult> {
     let graph_path = graph_path(dir);
 
-    // Load config for heartbeat timeout
+    // Load config for agency settings
     let config = Config::load(dir).unwrap_or_default();
-    let heartbeat_timeout_secs = (config.agent.heartbeat_timeout * 60) as i64;
 
-    // Clean up dead agents: process exited OR heartbeat stale
-    let finished_agents = cleanup_dead_agents(dir, &graph_path, heartbeat_timeout_secs)?;
+    // Clean up dead agents: process exited
+    let finished_agents = cleanup_dead_agents(dir, &graph_path)?;
     if !finished_agents.is_empty() {
         eprintln!("[coordinator] Cleaned up {} dead agent(s): {:?}", finished_agents.len(), finished_agents);
     }
 
-    // Now count truly alive agents (process still running and heartbeat fresh)
+    // Now count truly alive agents (process still running)
     let registry = AgentRegistry::load(dir)?;
     let alive_count = registry.agents.values()
         .filter(|a| a.is_alive() && is_process_alive(a.pid))
@@ -603,45 +602,44 @@ pub fn coordinator_tick(dir: &Path, max_agents: usize, executor: &str, model: Op
 enum DeadReason {
     /// Process is no longer running
     ProcessExited,
-    /// Heartbeat has gone stale
-    HeartbeatStale { seconds: i64 },
 }
 
 /// Check if an agent should be considered dead
-fn detect_dead_reason(agent: &AgentEntry, heartbeat_timeout_secs: i64) -> Option<DeadReason> {
+fn detect_dead_reason(agent: &AgentEntry) -> Option<DeadReason> {
     if !agent.is_alive() {
         return None;
     }
 
-    // Process not running is the strongest signal
+    // Process not running is the only signal — heartbeat is no longer used for detection
     if !is_process_alive(agent.pid) {
         return Some(DeadReason::ProcessExited);
-    }
-
-    // Heartbeat stale
-    if let Some(secs) = agent.seconds_since_heartbeat() {
-        if secs > heartbeat_timeout_secs {
-            return Some(DeadReason::HeartbeatStale { seconds: secs });
-        }
     }
 
     None
 }
 
-/// Clean up dead agents (process exited OR heartbeat stale)
+/// Clean up dead agents (process exited)
 /// Returns list of cleaned up agent IDs
-fn cleanup_dead_agents(dir: &Path, graph_path: &Path, heartbeat_timeout_secs: i64) -> Result<Vec<String>> {
+fn cleanup_dead_agents(dir: &Path, graph_path: &Path) -> Result<Vec<String>> {
     let mut locked_registry = AgentRegistry::load_locked(dir)?;
 
-    // Find agents that are dead: process gone OR heartbeat stale
+    // Find agents that are dead: process gone
     let dead: Vec<_> = locked_registry.agents.values()
         .filter_map(|a| {
-            detect_dead_reason(a, heartbeat_timeout_secs)
+            detect_dead_reason(a)
                 .map(|reason| (a.id.clone(), a.task_id.clone(), a.pid, reason))
         })
         .collect();
 
+    // Auto-bump heartbeat for agents whose process is still alive
+    for agent in locked_registry.agents.values_mut() {
+        if agent.is_alive() && is_process_alive(agent.pid) {
+            agent.last_heartbeat = Utc::now().to_rfc3339();
+        }
+    }
+
     if dead.is_empty() {
+        locked_registry.save_ref()?;
         return Ok(vec![]);
     }
 
@@ -667,10 +665,6 @@ fn cleanup_dead_agents(dir: &Path, graph_path: &Path, heartbeat_timeout_secs: i6
                     DeadReason::ProcessExited => format!(
                         "Task unclaimed: agent '{}' (PID {}) process exited",
                         agent_id, pid
-                    ),
-                    DeadReason::HeartbeatStale { seconds } => format!(
-                        "Task unclaimed: agent '{}' (PID {}) no heartbeat for {}s",
-                        agent_id, pid, seconds
                     ),
                 };
                 task.log.push(LogEntry {

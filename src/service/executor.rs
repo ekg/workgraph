@@ -450,8 +450,11 @@ impl ExecutorRegistry {
                     executor_type: "claude".to_string(),
                     command: "claude".to_string(),
                     args: vec![
+                        "--print".to_string(),
                         "--permission-mode".to_string(),
                         "bypassPermissions".to_string(),
+                        "--output-format".to_string(),
+                        "stream-json".to_string(),
                     ],
                     env: HashMap::new(),
                     prompt_template: Some(PromptTemplate {
