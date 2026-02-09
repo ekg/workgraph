@@ -14,3 +14,9 @@ cargo install --path .
 ```
 
 to update the global binary. Forgetting this step is a common source of "why isn't this working" issues when testing changes.
+
+## For Spawned Agents
+
+CRITICAL: Do NOT use built-in TaskCreate/TaskUpdate/TaskList/TaskGet tools.
+These are a separate system that does NOT interact with workgraph.
+Always use `wg` CLI commands for all task management.

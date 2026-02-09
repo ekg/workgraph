@@ -260,6 +260,9 @@ pub struct CoordinatorState {
     pub tasks_ready: usize,
     /// Number of agents spawned in last tick
     pub agents_spawned: usize,
+    /// Whether the coordinator is paused (no new agent spawns)
+    #[serde(default)]
+    pub paused: bool,
 }
 
 impl CoordinatorState {
@@ -825,6 +828,10 @@ pub enum IpcRequest {
     },
     /// Notify that the graph has changed; triggers an immediate coordinator tick
     GraphChanged,
+    /// Pause the coordinator (no new agent spawns, running agents unaffected)
+    Pause,
+    /// Resume the coordinator (triggers immediate tick)
+    Resume,
     /// Reconfigure the coordinator at runtime.
     /// If all fields are None, re-read config.toml from disk.
     Reconfigure {
@@ -1032,6 +1039,7 @@ struct DaemonConfig {
     executor: String,
     poll_interval: Duration,
     model: Option<String>,
+    paused: bool,
 }
 
 /// Run the actual daemon loop (called by forked process)
@@ -1089,6 +1097,7 @@ pub fn run_daemon(dir: &Path, socket_path: &str, cli_max_agents: Option<usize>, 
         // CLI --interval overrides it; otherwise use config.coordinator.poll_interval.
         poll_interval: Duration::from_secs(cli_interval.unwrap_or(config.coordinator.poll_interval)),
         model: cli_model.map(|s| s.to_string()).or_else(|| config.coordinator.model.clone()),
+        paused: false,
     };
 
     logger.info(&format!(
@@ -1120,6 +1129,7 @@ pub fn run_daemon(dir: &Path, socket_path: &str, cli_max_agents: Option<usize>, 
         agents_alive: 0,
         tasks_ready: 0,
         agents_spawned: 0,
+        paused: false,
     };
     coord_state.save(&dir);
 
@@ -1157,7 +1167,7 @@ pub fn run_daemon(dir: &Path, socket_path: &str, cli_max_agents: Option<usize>, 
 
         // Background safety-net tick: runs on poll_interval even without IPC events.
         // The fast-path is GraphChanged IPC which resets last_coordinator_tick.
-        if last_coordinator_tick.elapsed() >= daemon_cfg.poll_interval {
+        if !daemon_cfg.paused && last_coordinator_tick.elapsed() >= daemon_cfg.poll_interval {
             last_coordinator_tick = Instant::now();
 
             // Aggregate usage stats periodically
@@ -1308,6 +1318,29 @@ fn handle_request(dir: &Path, request: IpcRequest, running: &mut bool, wake_coor
                 "action": "coordinator_wake_scheduled",
             }))
         }
+        IpcRequest::Pause => {
+            logger.info("IPC Pause: pausing coordinator");
+            daemon_cfg.paused = true;
+            if let Some(mut coord_state) = CoordinatorState::load(dir) {
+                coord_state.paused = true;
+                coord_state.save(dir);
+            }
+            IpcResponse::success(serde_json::json!({
+                "status": "paused",
+            }))
+        }
+        IpcRequest::Resume => {
+            logger.info("IPC Resume: resuming coordinator");
+            daemon_cfg.paused = false;
+            if let Some(mut coord_state) = CoordinatorState::load(dir) {
+                coord_state.paused = false;
+                coord_state.save(dir);
+            }
+            *wake_coordinator = true;
+            IpcResponse::success(serde_json::json!({
+                "status": "resumed",
+            }))
+        }
         IpcRequest::Reconfigure { max_agents, executor, poll_interval, model } => {
             logger.info(&format!("IPC Reconfigure: max_agents={:?}, executor={:?}, poll_interval={:?}, model={:?}", max_agents, executor, poll_interval, model));
             handle_reconfigure(dir, daemon_cfg, max_agents, executor, poll_interval, model, logger)
@@ -1410,6 +1443,7 @@ fn handle_status(dir: &Path) -> IpcResponse {
         },
         "coordinator": {
             "enabled": coord.enabled,
+            "paused": coord.paused,
             "max_agents": coord.max_agents,
             "poll_interval": coord.poll_interval,
             "executor": coord.executor,
@@ -1653,6 +1687,7 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
             },
             "coordinator": {
                 "enabled": coord.enabled,
+                "paused": coord.paused,
                 "max_agents": coord.max_agents,
                 "poll_interval": coord.poll_interval,
                 "executor": coord.executor,
@@ -1680,8 +1715,9 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
         println!("Uptime: {}", uptime);
         println!("Agents: {} alive, {} idle, {} total", alive_count, idle_count, registry.agents.len());
         let model_str = coord.model.as_deref().unwrap_or("default");
-        println!("Coordinator: enabled, max_agents={}, poll_interval={}s, executor={}, model={}",
-                 coord.max_agents, coord.poll_interval, coord.executor, model_str);
+        let pause_str = if coord.paused { ", PAUSED" } else { "" };
+        println!("Coordinator: enabled{}, max_agents={}, poll_interval={}s, executor={}, model={}",
+                 pause_str, coord.max_agents, coord.poll_interval, coord.executor, model_str);
         if let Some(ref last) = coord.last_tick {
             println!("  Last tick: {} (#{}, agents_alive={}/{}, tasks_ready={}, spawned={})",
                      last, coord.ticks, coord.agents_alive, coord.max_agents,
@@ -1759,6 +1795,70 @@ pub fn run_reload(dir: &Path, max_agents: Option<usize>, executor: Option<&str>,
 
 #[cfg(not(unix))]
 pub fn run_reload(_dir: &Path, _max_agents: Option<usize>, _executor: Option<&str>, _interval: Option<u64>, _model: Option<&str>, _json: bool) -> Result<()> {
+    anyhow::bail!("Service daemon is only supported on Unix systems")
+}
+
+/// Pause the coordinator (no new agent spawns, running agents unaffected)
+#[cfg(unix)]
+pub fn run_pause(dir: &Path, json: bool) -> Result<()> {
+    let response = send_request(dir, IpcRequest::Pause)?;
+
+    if !response.ok {
+        let msg = response.error.unwrap_or_else(|| "Unknown error".to_string());
+        if json {
+            let output = serde_json::json!({ "error": msg });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            eprintln!("Error: {}", msg);
+        }
+        anyhow::bail!("{}", msg);
+    }
+
+    if json {
+        if let Some(data) = &response.data {
+            println!("{}", serde_json::to_string_pretty(data)?);
+        }
+    } else {
+        println!("Coordinator paused (running agents continue, no new spawns)");
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn run_pause(_dir: &Path, _json: bool) -> Result<()> {
+    anyhow::bail!("Service daemon is only supported on Unix systems")
+}
+
+/// Resume the coordinator (triggers immediate tick)
+#[cfg(unix)]
+pub fn run_resume(dir: &Path, json: bool) -> Result<()> {
+    let response = send_request(dir, IpcRequest::Resume)?;
+
+    if !response.ok {
+        let msg = response.error.unwrap_or_else(|| "Unknown error".to_string());
+        if json {
+            let output = serde_json::json!({ "error": msg });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            eprintln!("Error: {}", msg);
+        }
+        anyhow::bail!("{}", msg);
+    }
+
+    if json {
+        if let Some(data) = &response.data {
+            println!("{}", serde_json::to_string_pretty(data)?);
+        }
+    } else {
+        println!("Coordinator resumed");
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn run_resume(_dir: &Path, _json: bool) -> Result<()> {
     anyhow::bail!("Service daemon is only supported on Unix systems")
 }
 
@@ -2081,6 +2181,7 @@ mod tests {
             executor: "claude".to_string(),
             poll_interval: Duration::from_secs(60),
             model: None,
+            paused: false,
         };
 
         let logger = DaemonLogger::open(dir).unwrap();
@@ -2126,6 +2227,7 @@ poll_interval = 120
             executor: "claude".to_string(),
             poll_interval: Duration::from_secs(60),
             model: None,
+            paused: false,
         };
 
         let logger = DaemonLogger::open(dir).unwrap();

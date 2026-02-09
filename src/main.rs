@@ -1113,6 +1113,12 @@ enum ServiceCommands {
         model: Option<String>,
     },
 
+    /// Pause the coordinator (running agents continue, no new spawns)
+    Pause,
+
+    /// Resume the coordinator
+    Resume,
+
     /// Generate a systemd user service file for the wg service daemon
     Install,
 
@@ -1876,6 +1882,12 @@ fn main() -> Result<()> {
                     model.as_deref(),
                     cli.json,
                 )
+            }
+            ServiceCommands::Pause => {
+                commands::service::run_pause(&workgraph_dir, cli.json)
+            }
+            ServiceCommands::Resume => {
+                commands::service::run_resume(&workgraph_dir, cli.json)
             }
             ServiceCommands::Install => {
                 commands::service::generate_systemd_service(&workgraph_dir)

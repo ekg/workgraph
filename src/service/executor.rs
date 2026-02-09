@@ -22,6 +22,7 @@ pub struct TemplateVars {
     pub task_description: String,
     pub task_context: String,
     pub task_identity: String,
+    pub working_dir: String,
 }
 
 impl TemplateVars {
@@ -34,12 +35,18 @@ impl TemplateVars {
     pub fn from_task(task: &Task, context: Option<&str>, workgraph_dir: Option<&Path>) -> Self {
         let task_identity = Self::resolve_identity(task, workgraph_dir);
 
+        let working_dir = workgraph_dir
+            .and_then(|d| d.parent())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         Self {
             task_id: task.id.clone(),
             task_title: task.title.clone(),
             task_description: task.description.clone().unwrap_or_default(),
             task_context: context.unwrap_or_default().to_string(),
             task_identity,
+            working_dir,
         }
     }
 
@@ -93,6 +100,7 @@ impl TemplateVars {
             .replace("{{task_description}}", &self.task_description)
             .replace("{{task_context}}", &self.task_context)
             .replace("{{task_identity}}", &self.task_identity)
+            .replace("{{working_dir}}", &self.working_dir)
     }
 }
 
@@ -505,9 +513,16 @@ You MUST use these commands to track your work:
 - If the task description is unclear, do your best interpretation
 - Focus only on this specific task
 
+## CRITICAL: Use wg CLI, NOT built-in tools
+- You MUST use `wg` CLI commands for ALL task management
+- NEVER use built-in TaskCreate, TaskUpdate, TaskList, or TaskGet tools — they are a completely separate system that does NOT interact with workgraph
+- If you need to create subtasks: `wg add "title" --blocked-by {{task_id}}`
+- To check task status: `wg show <task-id>`
+- To list tasks: `wg list`
+
 Begin working on the task now."#.to_string(),
                     }),
-                    working_dir: None,
+                    working_dir: Some("{{working_dir}}".to_string()),
                     timeout: None,
                 },
             }),
