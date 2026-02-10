@@ -593,8 +593,10 @@ pub fn coordinator_tick(dir: &Path, max_agents: usize, executor: &str, model: Op
             continue;
         }
 
+        // Task-level model takes priority over service-level model
+        let effective_model = task.model.as_deref().or(model);
         eprintln!("[coordinator] Spawning agent for: {} - {}", task.id, task.title);
-        match spawn::spawn_agent(dir, &task.id, executor, None, model) {
+        match spawn::spawn_agent(dir, &task.id, executor, None, effective_model) {
             Ok((agent_id, pid)) => {
                 eprintln!("[coordinator] Spawned {} (PID {})", agent_id, pid);
                 spawned += 1;
