@@ -216,7 +216,7 @@ fn default_executor() -> String {
 }
 
 fn default_model() -> String {
-    "opus-4-5".to_string()
+    "opus".to_string()
 }
 
 fn default_interval() -> u64 {
