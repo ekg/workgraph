@@ -1,5 +1,7 @@
 use anyhow::{bail, Context, Result};
+use chrono::Utc;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -8,6 +10,8 @@ use workgraph::agency::{
     self, Evaluation, Lineage, Motivation, PerformanceRecord, Role, SkillRef,
 };
 use workgraph::config::Config;
+use workgraph::graph::{Node, Status, Task};
+use workgraph::{load_graph, save_graph};
 
 /// Strategies the evolver can use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,11 +272,68 @@ pub fn run(
         return Ok(());
     }
 
+    // Determine evolver's own role/motivation IDs for self-mutation detection
+    let evolver_entity_ids: HashSet<String> = {
+        let mut ids = HashSet::new();
+        if let Some(ref agent_hash) = config.agency.evolver_agent {
+            let agent_path = agency_dir.join("agents").join(format!("{}.yaml", agent_hash));
+            if let Ok(agent) = agency::load_agent(&agent_path) {
+                ids.insert(agent.role_id.clone());
+                ids.insert(agent.motivation_id.clone());
+            }
+        }
+        ids
+    };
+
     // Apply operations
     let mut results: Vec<serde_json::Value> = Vec::new();
     let mut applied = 0;
+    let mut deferred = 0;
 
     for op in &operations {
+        // Self-mutation safety: operations targeting the evolver's own
+        // role or motivation are deferred to a verified workgraph task
+        // that requires human approval.
+        if !evolver_entity_ids.is_empty() {
+            if let Some(ref target) = op.target_id {
+                let target_ids: Vec<&str> = target.split(',').map(|s| s.trim()).collect();
+                if target_ids.iter().any(|tid| evolver_entity_ids.contains(*tid)) {
+                    match defer_self_mutation(op, dir, actual_run_id) {
+                        Ok(task_id) => {
+                            deferred += 1;
+                            let result = serde_json::json!({
+                                "op": op.op,
+                                "target_id": op.target_id,
+                                "status": "deferred_for_review",
+                                "review_task": task_id,
+                                "reason": "Operation targets evolver's own identity — requires human approval",
+                            });
+                            if !json {
+                                eprintln!(
+                                    "  [deferred] {} on {:?} → review task '{}' (evolver self-mutation)",
+                                    op.op,
+                                    op.target_id,
+                                    task_id,
+                                );
+                            }
+                            results.push(result);
+                        }
+                        Err(e) => {
+                            let err_msg = format!(
+                                "Failed to defer self-mutation {:?}: {}", op.op, e
+                            );
+                            eprintln!("{}", err_msg);
+                            results.push(serde_json::json!({
+                                "op": op.op,
+                                "error": err_msg,
+                            }));
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+
         match apply_operation(op, &roles, &motivations, actual_run_id, &roles_dir, &motivations_dir) {
             Ok(result) => {
                 applied += 1;
@@ -293,7 +354,7 @@ pub fn run(
     }
 
     if json {
-        let out = serde_json::json!({
+        let mut out = serde_json::json!({
             "run_id": actual_run_id,
             "strategy": strategy.label(),
             "operations_proposed": operations.len(),
@@ -301,12 +362,18 @@ pub fn run(
             "results": results,
             "summary": evolver_output.summary,
         });
+        if deferred > 0 {
+            out["operations_deferred"] = serde_json::json!(deferred);
+        }
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         println!("\n=== Evolution Complete ===");
         println!("Run ID:     {}", actual_run_id);
         println!("Strategy:   {}", strategy.label());
         println!("Applied:    {} of {} operations", applied, operations.len());
+        if deferred > 0 {
+            println!("Deferred:   {} (evolver self-mutations, require human approval)", deferred);
+        }
         if let Some(ref summary) = evolver_output.summary {
             println!("Summary:    {}", summary);
         }
@@ -568,6 +635,53 @@ fn build_evolver_prompt(
         }
     }
 
+    // Meta-agent assignments (assigner, evaluator, evolver)
+    {
+        let agents_dir = agency_dir.join("agents");
+        let meta_agents: Vec<(&str, &Option<String>)> = vec![
+            ("Assigner", &config.agency.assigner_agent),
+            ("Evaluator", &config.agency.evaluator_agent),
+            ("Evolver", &config.agency.evolver_agent),
+        ];
+        let mut has_any = false;
+        for (label, agent_hash) in &meta_agents {
+            if let Some(hash) = agent_hash {
+                if !has_any {
+                    out.push_str("## Meta-Agent Assignments\n\n");
+                    out.push_str(
+                        "These agents fill coordination roles (assigner, evaluator, evolver). \
+                         Their underlying roles and motivations are valid mutation targets. \
+                         **Evolving the evolver's own role or motivation requires human approval.**\n\n",
+                    );
+                    has_any = true;
+                }
+                let agent_path = agents_dir.join(format!("{}.yaml", hash));
+                if let Ok(agent) = agency::load_agent(&agent_path) {
+                    let role_name = roles.iter()
+                        .find(|r| r.id == agent.role_id)
+                        .map(|r| r.name.as_str())
+                        .unwrap_or("unknown");
+                    let mot_name = motivations.iter()
+                        .find(|m| m.id == agent.motivation_id)
+                        .map(|m| m.name.as_str())
+                        .unwrap_or("unknown");
+                    out.push_str(&format!(
+                        "- **{}**: agent `{}`, role `{}` ({}), motivation `{}` ({})\n",
+                        label, hash, agent.role_id, role_name, agent.motivation_id, mot_name,
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "- **{}**: agent `{}` (could not load details)\n",
+                        label, hash,
+                    ));
+                }
+            }
+        }
+        if has_any {
+            out.push('\n');
+        }
+    }
+
     // Strategy
     out.push_str("## Strategy\n\n");
     match strategy {
@@ -709,6 +823,82 @@ fn extract_json(raw: &str) -> Option<String> {
     }
 
     None
+}
+
+// ---------------------------------------------------------------------------
+// Evolver self-mutation deferral
+// ---------------------------------------------------------------------------
+
+/// Create a verified workgraph task for an evolver self-mutation operation.
+/// The task requires human approval before the mutation can be applied.
+fn defer_self_mutation(
+    op: &EvolverOperation,
+    dir: &Path,
+    run_id: &str,
+) -> Result<String> {
+    let graph_path = super::graph_path(dir);
+    let mut graph = load_graph(&graph_path)
+        .context("Failed to load graph for self-mutation deferral")?;
+
+    let task_id = format!(
+        "evolve-review-{}-{}",
+        op.op,
+        op.target_id.as_deref().unwrap_or("unknown"),
+    );
+
+    // Don't create duplicate review tasks
+    if graph.get_task(&task_id).is_some() {
+        return Ok(task_id);
+    }
+
+    let op_json = serde_json::to_string_pretty(op)
+        .unwrap_or_else(|_| format!("{:?}", op.op));
+
+    let desc = format!(
+        "The evolver (run {run_id}) proposed a mutation targeting its own identity. \
+         This requires human review before applying.\n\n\
+         ## Proposed Operation\n\n\
+         ```json\n{op_json}\n```\n\n\
+         ## Instructions\n\n\
+         Review the proposed change. If acceptable, apply it manually with \
+         `wg evolve` or by editing the role/motivation YAML directly, then \
+         `wg approve {task_id}`.",
+    );
+
+    let task = Task {
+        id: task_id.clone(),
+        title: format!("Review evolver self-mutation: {} on {}", op.op, op.target_id.as_deref().unwrap_or("?")),
+        description: Some(desc),
+        status: Status::Open,
+        assigned: None,
+        estimate: None,
+        blocks: vec![],
+        blocked_by: vec![],
+        requires: vec![],
+        tags: vec!["evolution".to_string(), "agency".to_string()],
+        skills: vec![],
+        inputs: vec![],
+        deliverables: vec![],
+        artifacts: vec![],
+        exec: None,
+        not_before: None,
+        created_at: Some(Utc::now().to_rfc3339()),
+        started_at: None,
+        completed_at: None,
+        log: vec![],
+        retry_count: 0,
+        max_retries: None,
+        failure_reason: None,
+        model: None,
+        verify: Some("Human must approve evolver self-mutation before applying.".to_string()),
+        agent: None,
+    };
+
+    graph.add_node(Node::Task(task));
+    save_graph(&graph, &graph_path)
+        .context("Failed to save graph with self-mutation review task")?;
+
+    Ok(task_id)
 }
 
 // ---------------------------------------------------------------------------
