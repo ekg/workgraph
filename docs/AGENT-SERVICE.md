@@ -1,368 +1,306 @@
 # Agent Service Architecture
 
-The agent service layer enables seamless subagent dispatch - a coordinator agent can spawn, monitor, and manage worker agents without manual intervention.
+The agent service is a background daemon that automatically spawns agents on ready tasks, monitors their health, and manages their lifecycle. Start it once and it handles everything.
 
 ## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Coordinator Agent                        │
-│  (checks wg ready, decides what to spawn, monitors progress) │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      wg service                              │
-│  - Agent registry (PIDs, status, current task)              │
-│  - Executor plugins (claude, shell, custom)                  │
-│  - Output routing (capture → task artifacts)                 │
-│  - Health monitoring (heartbeats, dead agent detection)      │
+│                    Service Daemon (wg service start)        │
+│                                                             │
+│  Unix socket listener  ←──── IPC: graph_changed, spawn,    │
+│  Coordinator loop            kill, pause, resume, status    │
+│  Agent reaper                                               │
+│  Dead agent detector                                        │
 └──────┬──────────────┬──────────────┬───────────────────────┘
        │              │              │
        ▼              ▼              ▼
    ┌───────┐     ┌───────┐     ┌───────┐
    │Agent 1│     │Agent 2│     │Agent 3│
    │task-a │     │task-b │     │task-c │
+   │(claude)│    │(claude)│    │(shell)│
    └───────┘     └───────┘     └───────┘
+   (detached via setsid — survives daemon restart)
 ```
 
-## Commands
+## Quick Start
+
+```bash
+wg service start                  # start daemon
+wg service status                 # check it's running
+wg agents                         # see spawned agents
+wg service stop                   # stop daemon (agents keep running)
+wg service stop --kill-agents     # stop daemon and agents
+```
+
+## The Coordinator Tick
+
+The daemon runs a coordinator tick on two triggers:
+
+1. **IPC-driven**: Any command that modifies the graph (done, add, edit, fail, etc.) sends a `graph_changed` notification over the Unix socket, triggering an immediate tick
+2. **Safety-net poll**: A background tick every `poll_interval` seconds (default: 60s) catches manual graph.jsonl edits or missed events
+
+Each tick does:
+
+```
+1. Reap zombie child processes (waitpid for exited agents)
+2. Clean up dead agents (process exited or heartbeat stale)
+3. Count alive agents → if >= max_agents, stop here
+4. Get ready tasks (open, all blockers done, not_before passed)
+
+5. [IF auto_assign enabled]
+   For each unassigned ready task (no agent field):
+     Skip meta-tasks (tagged assignment/evaluation/evolution)
+     Create assign-{task-id} blocker task
+     Set assigner_model and assigner_agent on the new task
+     The assigner runs: wg agent list, wg role list, then wg assign <task> <agent-hash>
+
+6. [IF auto_evaluate enabled]
+   For each completed task without an existing evaluate-{task-id}:
+     Skip meta-tasks (tagged evaluation/assignment/evolution)
+     Create evaluate-{task-id} blocked by the original task
+     Set evaluator_model and evaluator_agent on the new task
+     Unblock eval tasks whose source task is Failed (so failures get evaluated too)
+
+7. Spawn agents on ready tasks:
+     Resolve effective model: task.model > coordinator.model > agent.model
+     Register agent in AgentRegistry
+     Detach with setsid()
+```
+
+## Service Commands
 
 ### `wg service start`
 
-Starts the agent service daemon.
+Start the background daemon.
 
 ```bash
-wg service start [--port 9746] [--socket /tmp/wg.sock]
+wg service start [--max-agents <N>] [--executor <NAME>] [--interval <SECS>] [--model <MODEL>]
 ```
 
-The service:
-- Listens for spawn requests
-- Maintains agent registry
-- Monitors agent health
-- Routes output to task artifacts
+CLI flags override config.toml values for the daemon's lifetime. The daemon forks into the background and writes its PID to `.workgraph/service/state.json`.
 
 ### `wg service stop`
 
-Gracefully stops the service (waits for agents to finish or kills them).
+Stop the daemon.
 
 ```bash
-wg service stop [--force]  # --force kills running agents
+wg service stop                   # graceful SIGTERM
+wg service stop --force           # immediate SIGKILL
+wg service stop --kill-agents     # stop daemon and kill all agents
 ```
+
+By default, detached agents continue running after the daemon stops. Use `--kill-agents` to clean up everything.
 
 ### `wg service status`
 
-Shows service status.
+Show daemon status, uptime, coordinator state, and agent summary.
 
 ```bash
 wg service status
-# Service: running (pid 12345)
-# Agents: 3 active, 2 idle
-# Uptime: 4h 23m
 ```
 
-### `wg spawn <task-id>`
+### `wg service reload`
 
-Spawns an agent to work on a specific task.
+Re-read config.toml or apply specific overrides without restarting.
 
 ```bash
-wg spawn task-123 --executor claude [--model opus-4] [--timeout 30m]
-wg spawn task-456 --executor shell --command "./scripts/build.sh"
-wg spawn task-789 --executor custom --config executors/my-agent.toml
+wg service reload                              # re-read config.toml
+wg service reload --max-agents 8 --model haiku # apply overrides
 ```
 
-What happens:
-1. Claims the task (fails if already claimed)
-2. Starts executor with task context
-3. Registers agent in registry
-4. Returns agent ID
+Sends a `reconfigure` IPC message to the running daemon.
+
+### `wg service pause`
+
+Pause the coordinator. Running agents continue working, but no new agents are spawned.
 
 ```bash
-$ wg spawn implement-feature --executor claude
-Spawned agent-7 for task 'implement-feature'
-  Executor: claude (opus-4)
-  PID: 54321
-  Output: .workgraph/agents/agent-7/output.log
+wg service pause
 ```
 
-### `wg agents`
+The paused state is persisted in `coordinator-state.json` and survives daemon restarts.
 
-Lists running agents.
+### `wg service resume`
+
+Resume the coordinator and trigger an immediate tick.
 
 ```bash
-$ wg agents
-ID       TASK                 EXECUTOR  PID    UPTIME  STATUS
-agent-1  implement-feature    claude    54321  12m     working
-agent-2  write-tests          claude    54322  8m      working
-agent-3  update-docs          shell     54323  2m      idle
-
-$ wg agents --json  # for scripting
+wg service resume
 ```
 
-### `wg kill <agent-id>`
+### `wg service tick`
 
-Terminates an agent.
+Run a single coordinator tick and exit. Useful for debugging.
 
 ```bash
-wg kill agent-1              # graceful (SIGTERM, wait, SIGKILL)
-wg kill agent-1 --force      # immediate (SIGKILL)
-wg kill --all                # kill all agents
+wg service tick [--max-agents <N>] [--executor <NAME>] [--model <MODEL>]
 ```
 
-The task is automatically unclaimed when the agent is killed.
+### `wg service install`
+
+Generate a systemd user service file.
+
+```bash
+wg service install
+```
+
+## Spawning
+
+When the coordinator spawns an agent for a task:
+
+1. **Claim**: The task is claimed (status → `in-progress`)
+2. **Model resolution**: task.model > coordinator.model > agent.model
+3. **Identity injection**: If the task has an `agent` field, the agent's role and motivation are loaded from `.workgraph/agency/` and rendered into an identity prompt section
+4. **Wrapper script**: A bash script is generated at `.workgraph/agents/agent-N/run.sh`:
+   - Runs the executor command (e.g., `claude --model opus --print "..."`)
+   - Captures stdout/stderr to `output.log`
+   - Sends heartbeats periodically
+   - On exit: checks task status, marks done/submitted/failed based on exit code
+   - For verified tasks (with `verify` field): uses `wg submit` instead of `wg done`
+5. **Detach**: Process is launched with `setsid()` so it survives daemon restarts
+6. **Register**: Agent is added to the registry with PID, task_id, executor, model, and start time
+
+### Manual spawning
+
+Outside the service, you can spawn agents directly:
+
+```bash
+wg spawn my-task --executor claude --model haiku --timeout 30m
+```
 
 ## Agent Registry
 
-Lives at `.workgraph/service/registry.json`:
+Lives at `.workgraph/service/registry.json`. Protected by flock-based locking for concurrent access.
 
-```json
-{
-  "agents": {
-    "agent-1": {
-      "id": "agent-1",
-      "pid": 54321,
-      "task_id": "implement-feature",
-      "executor": "claude",
-      "started_at": "2026-01-27T10:00:00Z",
-      "last_heartbeat": "2026-01-27T10:12:00Z",
-      "status": "working",
-      "output_file": ".workgraph/agents/agent-1/output.log"
-    }
-  },
-  "next_agent_id": 8
-}
-```
+Each entry tracks:
+- `id`: agent-N (incrementing counter)
+- `task_id`: the task being worked on
+- `executor`: claude, shell, etc.
+- `pid`: OS process ID
+- `status`: Starting, Working, Idle, Dead
+- `started_at`: ISO 8601 timestamp
+- `last_heartbeat`: ISO 8601 timestamp
+- `model`: effective model used
 
-## Executor Plugins
-
-Executors define how to run agents. Built-in executors:
-
-### Claude Executor
-
-Spawns Claude Code to work on a task.
-
-```toml
-# .workgraph/executors/claude.toml
-[executor]
-type = "claude"
-command = "claude"
-args = ["--print", "--dangerously-skip-permissions"]
-
-[executor.env]
-CLAUDE_MODEL = "opus-4"
-
-[executor.prompt_template]
-# Injected as system context
-template = """
-You are working on task: {{task_id}}
-Title: {{task_title}}
-Description: {{task_description}}
-
-Context from dependencies:
-{{task_context}}
-
-When done, run: wg done {{task_id}}
-If blocked, run: wg fail {{task_id}} --reason "..."
-"""
-```
-
-### Shell Executor
-
-Runs a shell command.
-
-```toml
-# .workgraph/executors/shell.toml
-[executor]
-type = "shell"
-command = "bash"
-args = ["-c", "{{task_command}}"]
-
-[executor.env]
-TASK_ID = "{{task_id}}"
-```
-
-### Custom Executor
-
-Any command that follows the protocol:
-1. Receives task info via env vars or stdin
-2. Does work
-3. Calls `wg done` or `wg fail` when finished
-
-## Output Routing
-
-Agent output is captured and linked to tasks:
+## Agent Lifecycle
 
 ```
-.workgraph/
-├── agents/
-│   ├── agent-1/
-│   │   ├── output.log      # stdout/stderr
-│   │   ├── metadata.json   # timing, exit code
-│   │   └── artifacts/      # files produced
-│   └── agent-2/
-│       └── ...
+spawned → working → [heartbeat...] → done|failed|dead
+                                        │
+                                        ▼
+                                  task unclaimed
+                                  (available for retry)
 ```
-
-When an agent completes:
-1. Output log is linked as task artifact
-2. Any files in `artifacts/` are added to task
-3. Metadata recorded (duration, exit code, etc.)
-
-## Health Monitoring
 
 ### Heartbeats
 
-Agents send heartbeats every 30s (configurable):
+Spawned agents send heartbeats via the wrapper script. The coordinator checks for stale agents (no heartbeat within `heartbeat_timeout` minutes, default: 5) on each tick and marks them dead.
+
+### Dead agent cleanup
 
 ```bash
-# Agent does this automatically, or manually:
-wg heartbeat agent-1
+wg dead-agents --check       # read-only check
+wg dead-agents --cleanup     # mark dead and unclaim tasks
+wg dead-agents --remove      # remove dead entries from registry
+wg dead-agents --processes   # check if agent PIDs are still running
 ```
 
-### Dead Agent Detection
-
-Service checks for dead agents every 60s:
-
-```
-if now - last_heartbeat > threshold:
-    mark agent as dead
-    unclaim task (or reclaim for retry)
-    notify coordinator
-```
-
-### Coordinator Notification
-
-When interesting events happen, the service can notify:
-
-```toml
-# .workgraph/config.toml
-[service.notifications]
-on_agent_done = "wg ready"           # run command
-on_agent_failed = "notify-send 'Agent failed'"
-on_agent_dead = "wg reclaim {{task_id}}"
-```
-
-## Coordinator Pattern
-
-With the service layer, the coordinator pattern becomes:
-
-```python
-# Pseudocode for coordinator agent
-
-while True:
-    ready = wg_ready()
-    if not ready:
-        if all_done():
-            break
-        sleep(10)
-        continue
-
-    for task in ready[:max_parallel]:
-        wg_spawn(task.id, executor="claude")
-
-    # Service handles the rest:
-    # - Monitors agents
-    # - Captures output
-    # - Detects failures
-    # - Unclaims on death
-
-    sleep(30)
-```
-
-Or as a simple bash script:
-
-```bash
-#!/bin/bash
-# coordinator.sh - spawn agents for all ready tasks
-
-while true; do
-    READY=$(wg ready --json | jq -r '.[].id')
-
-    if [ -z "$READY" ]; then
-        OPEN=$(wg list --json | jq '[.[] | select(.status == "open")] | length')
-        if [ "$OPEN" -eq 0 ]; then
-            echo "All done!"
-            break
-        fi
-        sleep 10
-        continue
-    fi
-
-    for TASK in $READY; do
-        RUNNING=$(wg agents --json | jq -r '.[].task_id' | grep -c "^$TASK$")
-        if [ "$RUNNING" -eq 0 ]; then
-            wg spawn "$TASK" --executor claude &
-        fi
-    done
-
-    sleep 30
-done
-```
+The coordinator does this automatically on each tick, but these commands are useful for manual intervention.
 
 ## Configuration
 
 ```toml
 # .workgraph/config.toml
 
-[service]
-socket = "/tmp/wg-{{project}}.sock"
-max_agents = 10
-heartbeat_interval = 30
-dead_threshold = 120
+[coordinator]
+max_agents = 4           # max parallel agents (default: 4)
+interval = 30            # standalone coordinator tick interval
+poll_interval = 60       # daemon safety-net poll interval (default: 60)
+executor = "claude"      # executor for spawned agents
+model = "opus"           # model override for all spawns (optional)
 
-[service.defaults]
-executor = "claude"
-timeout = "1h"
+[agent]
+executor = "claude"      # default executor
+model = "opus"           # default model
+heartbeat_timeout = 5    # minutes before stale (default: 5)
 
-[service.notifications]
-on_agent_done = ""
-on_agent_failed = ""
-on_agent_dead = "wg reclaim {{task_id}}"
+[agency]
+auto_evaluate = false    # auto-create evaluation tasks
+auto_assign = false      # auto-create assignment tasks
+assigner_model = "haiku" # model for assigner agents
+evaluator_model = "opus" # model for evaluator agents
+evolver_model = "opus"   # model for evolver agents
+assigner_agent = ""      # content-hash of assigner agent identity
+evaluator_agent = ""     # content-hash of evaluator agent identity
+evolver_agent = ""       # content-hash of evolver agent identity
 ```
+
+### Model hierarchy
+
+For regular tasks:
+1. CLI `--model` on `wg spawn` (highest)
+2. `task.model` (per-task override)
+3. `coordinator.model`
+4. `agent.model` (lowest)
+
+For agency meta-tasks:
+- Assignment: `agency.assigner_model` > `agent.model`
+- Evaluation: `agency.evaluator_model` > `task.model` > `agent.model`
+- Evolution: `agency.evolver_model` > `agent.model`
 
 ## IPC Protocol
 
-Service uses Unix socket for IPC:
+The daemon listens on a Unix socket at `/tmp/wg-{project}.sock`.
+
+| Command | Description |
+|---------|-------------|
+| `graph_changed` | Trigger immediate coordinator tick |
+| `spawn` | Spawn agent for a task |
+| `agents` | List agents |
+| `kill` | Kill an agent |
+| `heartbeat` | Record agent heartbeat |
+| `status` | Get daemon status |
+| `shutdown` | Graceful shutdown |
+| `pause` | Pause coordinator |
+| `resume` | Resume coordinator |
+| `reconfigure` | Update config at runtime |
+
+Commands that modify the graph (`wg done`, `wg add`, `wg edit`, `wg fail`, etc.) automatically send `graph_changed` to trigger an immediate tick.
+
+## State Files
 
 ```
-Request: {"cmd": "spawn", "task_id": "foo", "executor": "claude"}
-Response: {"ok": true, "agent_id": "agent-7", "pid": 54321}
+.workgraph/service/
+├── state.json              # Daemon PID, socket path, start time
+├── daemon.log              # Timestamped daemon logs (10MB rotation)
+├── daemon.log.1            # Rotated backup
+├── coordinator-state.json  # Coordinator metrics: paused, ticks, agents_alive, etc.
+└── registry.json           # Agent registry (flock-protected)
 
-Request: {"cmd": "agents"}
-Response: {"ok": true, "agents": [...]}
-
-Request: {"cmd": "kill", "agent_id": "agent-7"}
-Response: {"ok": true}
+.workgraph/agents/
+└── agent-N/
+    ├── run.sh              # Wrapper script
+    ├── output.log          # Agent stdout/stderr
+    ├── prompt.txt          # Rendered prompt (claude executor)
+    └── metadata.json       # Agent metadata (timing, exit code)
 ```
 
-This allows `wg spawn` to work whether called from CLI or programmatically.
+## Troubleshooting
 
-## Task Graph After Service Implementation
+**Daemon logs**: `.workgraph/service/daemon.log`
 
-```
-design-agent-service
-├── implement-agent-registry
-│   ├── implement-wg-agents
-│   ├── implement-wg-kill
-│   ├── add-agent-heartbeat
-│   │   └── implement-dead-agent
-│   └── implement-wg-service ←─┐
-├── implement-executor-plugin  │
-│   ├── implement-claude-executor
-│   │   └── integration-coordinator-spawns ←─┐
-│   ├── implement-shell-executor              │
-│   └── implement-wg-service ─────────────────┘
-└── implement-wg-spawn
-    └── implement-output-capture
-        └── link-agent-outputs
-
-update-documentation-for (← after integration)
+```bash
+wg service status    # shows recent errors
 ```
 
-## Future Extensions
+**Common issues:**
 
-- **Web UI**: Real-time agent dashboard
-- **Remote agents**: Spawn on different machines
-- **Resource limits**: CPU/memory caps per agent
-- **Priority queue**: High-priority tasks get agents first
-- **Agent pools**: Pre-warmed agents for faster spawn
+| Problem | Fix |
+|---------|-----|
+| "Socket already exists" | `wg service stop` or delete stale socket |
+| Agents not spawning | Check `wg service status`, verify `max_agents` not reached with `wg agents --alive`, ensure `wg ready` has tasks |
+| Agent marked dead prematurely | Increase `heartbeat_timeout` in config.toml |
+| Config changes not taking effect | `wg service reload` |
+| Daemon won't start | Check for existing daemon with `wg service status` |
+| Agents not picking up identity | Ensure task has `agent` field set via `wg assign` or auto-assign |

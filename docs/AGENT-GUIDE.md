@@ -1,267 +1,156 @@
 # Workgraph Agent Guide
 
-This guide covers operating AI agents with workgraph, including the autonomous agent runtime, task selection, coordination patterns, and integration with AI coding assistants.
+How to operate AI agents with workgraph: the service daemon, spawning, identity injection, evaluation, and manual operation.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Agent Architecture](#agent-architecture)
-- [Setting Up Agents](#setting-up-agents)
-- [The Agent Loop](#the-agent-loop)
-- [Task Selection](#task-selection)
+- [Service Mode (recommended)](#service-mode-recommended)
+- [Agent Identity](#agent-identity)
 - [Manual Agent Operation](#manual-agent-operation)
+- [The Autonomous Agent Loop](#the-autonomous-agent-loop)
+- [Task Selection](#task-selection)
 - [Multi-Agent Coordination](#multi-agent-coordination)
 - [Context and Trajectories](#context-and-trajectories)
-- [Configuration](#configuration)
-- [Monitoring Agents](#monitoring-agents)
+- [Model Selection](#model-selection)
+- [Monitoring](#monitoring)
 - [Best Practices](#best-practices)
 
 ---
 
 ## Overview
 
-Workgraph supports AI agent operation through:
+Workgraph supports three ways to run agents:
 
-1. **Autonomous mode**: `wg agent` runs a continuous wake/check/work/sleep loop
-2. **Manual mode**: Agents use `wg next`, `wg claim`, `wg done` for step-by-step control
-3. **Exec mode**: `wg exec` runs shell commands attached to tasks
+1. **Service mode** (recommended): `wg service start` runs a daemon that automatically spawns agents on ready tasks, monitors them, and cleans up dead ones. This is the primary workflow.
+2. **Autonomous loop**: `wg agent run` runs a continuous wake/check/work/sleep cycle for a single agent.
+3. **Manual mode**: Agents use `wg ready`, `wg claim`, `wg done` for step-by-step control.
 
-Agents are registered as actors with capabilities, and workgraph matches them to appropriate tasks.
-
----
-
-## Agent Architecture
-
-### The Wake/Check/Work/Sleep Cycle
-
-```
-     ┌──────────────────────────────────────┐
-     │                                      │
-     v                                      │
-   WAKE                                     │
-     │                                      │
-     │  Record heartbeat                    │
-     │                                      │
-     v                                      │
-   CHECK                                    │
-     │                                      │
-     │  Find ready tasks                    │
-     │  Match to agent capabilities         │
-     │  Select best task                    │
-     │                                      │
-     ├──── No work? ───────────────────────>│
-     │                                      │
-     v                                      │
-   WORK                                     │
-     │                                      │
-     │  Claim task                          │
-     │  Execute (if exec command set)       │
-     │  Mark done or failed                 │
-     │                                      │
-     v                                      │
-   SLEEP ──────────────────────────────────>┘
-     │
-     │  Wait interval seconds
-     │
-     └── (repeat until stopped)
-```
-
-### Agent Identity
-
-Each agent needs an actor record:
-
-```bash
-wg actor add agent-1 \
-  --name "Claude Agent 1" \
-  --role agent \
-  --trust-level provisional \
-  -c coding \
-  -c documentation \
-  -c testing
-```
-
-The actor record stores:
-- **capabilities**: Skills the agent can apply
-- **trust_level**: verified (full trust), provisional (limited), unknown
-- **context_limit**: Maximum context tokens (for trajectory planning)
-- **last_seen**: Heartbeat timestamp (for detecting dead agents)
+In all modes, the agency system can inject an identity (role + motivation) into the agent's prompt when it starts working on a task.
 
 ---
 
-## Setting Up Agents
+## Service Mode (recommended)
 
-### 1. Initialize the Workgraph
+The service daemon handles everything: finding ready tasks, spawning agents, reaping dead ones, and picking up newly unblocked work.
 
-```bash
-wg init
-```
-
-### 2. Register Agent Actors
+### Starting the service
 
 ```bash
-# Primary coding agent
-wg actor add claude-main \
-  --name "Claude Main" \
-  --role agent \
-  --trust-level provisional \
-  -c rust \
-  -c python \
-  -c documentation
-
-# Secondary agent for testing
-wg actor add claude-test \
-  --name "Claude Test" \
-  --role agent \
-  --trust-level provisional \
-  -c testing \
-  -c review
+wg service start
 ```
 
-### 3. Configure Agent Settings
+That's it. The daemon auto-spawns agents on ready tasks (up to `max_agents` in parallel). When a task completes and unblocks new ones, the daemon picks those up on the next tick.
+
+### How the coordinator tick works
+
+Each tick, the coordinator:
+
+1. **Reaps zombie child processes** — agents that exited
+2. **Cleans up dead agents** — process exited or heartbeat stale
+3. **Counts alive agents** — if `>= max_agents`, skips spawning
+4. **Gets ready tasks** — open tasks with all dependencies done
+5. **[If auto_assign enabled]** Creates `assign-{task}` blocker tasks for unassigned ready tasks, dispatched with the assigner model/agent
+6. **[If auto_evaluate enabled]** Creates `evaluate-{task}` tasks blocked by completed tasks, dispatched with the evaluator model/agent
+7. **Spawns agents** on remaining ready tasks, respecting per-task model overrides
+
+The coordinator runs on two triggers:
+- **IPC-driven immediate ticks**: Any graph change (done, add, edit, fail) sends a `graph_changed` notification over the Unix socket, triggering an immediate tick
+- **Safety-net poll**: A background tick every `poll_interval` seconds (default: 60s) catches manual edits or missed events
+
+### Pausing and resuming
 
 ```bash
-# Set defaults for agent behavior
-wg config --executor claude --model opus-4-5 --set-interval 10
+wg service pause    # running agents continue, no new spawns
+wg service resume   # resume coordinator, immediate tick
 ```
 
-Or edit `.workgraph/config.toml` directly:
+Pause is useful when you want running agents to finish but don't want new work dispatched (e.g., during a deploy).
+
+### Configuration
 
 ```toml
+# .workgraph/config.toml
+
+[coordinator]
+max_agents = 4         # max parallel agents
+poll_interval = 60     # safety-net tick interval (seconds)
+executor = "claude"    # executor for spawned agents
+model = "opus"         # model override (optional)
+
 [agent]
 executor = "claude"
-model = "opus-4-5"
-interval = 10           # seconds between iterations
-max_tasks = 50          # stop after N tasks (optional)
-heartbeat_timeout = 5   # minutes before agent considered dead
+model = "opus"         # default model
+heartbeat_timeout = 5  # minutes before agent is considered dead
 
-[project]
-name = "My Project"
+[agency]
+auto_evaluate = false  # auto-create evaluation tasks
+auto_assign = false    # auto-create identity assignment tasks
+assigner_model = "haiku"
+evaluator_model = "opus"
+evolver_model = "opus"
 ```
 
-### 4. Add Tasks with Skill Requirements
+### What happens when a task is spawned
 
-```bash
-wg add "Implement user service" \
-  --skill rust \
-  --skill api-design \
-  --deliverable src/services/user.rs
-
-wg add "Write unit tests" \
-  --blocked-by implement-user-service \
-  --skill testing \
-  --deliverable tests/user_test.rs
-```
+1. The coordinator claims the task (sets status to `in-progress`)
+2. It resolves the effective model: task's `model` field > coordinator `model` > agent `model`
+3. If the task has an `agent` field (identity assignment), the agent's role and motivation are loaded and injected into the prompt
+4. A wrapper script is generated in `.workgraph/agents/agent-N/run.sh` that:
+   - Runs the executor (claude, shell, etc.)
+   - Captures output to `output.log`
+   - On exit: marks the task as done, submitted (if verified), or failed
+5. The process is detached with `setsid()` so it survives daemon restarts
+6. The agent is registered in the agent registry
 
 ---
 
-## The Agent Loop
+## Agent Identity
 
-### Running the Autonomous Agent
+The agency system lets you assign composable identities to agents. When a task has an agent assignment, the spawned agent receives an identity section in its prompt covering:
 
-```bash
-# Run continuously
-wg agent --actor claude-main
+- **Role**: skills, desired outcome, description
+- **Motivation**: acceptable trade-offs, hard constraints, description
 
-# Run single iteration (good for testing)
-wg agent --actor claude-main --once
-
-# Custom interval
-wg agent --actor claude-main --interval 30
-
-# Stop after completing 10 tasks
-wg agent --actor claude-main --max-tasks 10
-```
-
-### Agent Output
-
-```
-Agent 'claude-main' starting...
-   Interval: 10s | Once: false | Max tasks: None
-
--> Working on: implement-api - Implement API endpoints
-  Executing: cargo build
-  | Compiling api v0.1.0
-  | Finished dev [unoptimized + debuginfo]
-Completed: implement-api
-
--> Working on: run-tests - Run test suite
-  Executing: cargo test
-  | running 15 tests
-  | test result: ok. 15 passed
-Completed: run-tests
-
-No work available, sleeping 10s...
-```
-
-### Tasks with Exec Commands
-
-For fully automated execution, attach shell commands to tasks:
+### Manual assignment
 
 ```bash
-# Set exec command
-wg exec run-tests --set "cargo test"
-wg exec build --set "cargo build --release"
-wg exec deploy --set "./scripts/deploy.sh"
+# Create roles and motivations
+wg role add "Programmer" --outcome "Working, tested code" --skill rust --skill testing
+wg motivation add "Careful" --accept "Slow" --reject "Untested"
 
-# Agent will automatically run these
-wg agent --actor ci-agent
+# Pair them into an agent
+wg agent create "Careful Coder" --role <role-hash> --motivation <motivation-hash>
+
+# Assign to a task
+wg assign my-task <agent-hash>
 ```
 
-### Tasks Without Exec Commands
+### Automatic assignment
 
-When a task has no exec command, the agent claims it and reports:
-
-```
--> Working on: design-api - Design API schema
-  No exec command - task claimed for external execution
-  Complete with: wg done design-api
-```
-
-The task remains in-progress for manual or AI-assisted completion.
-
----
-
-## Task Selection
-
-### How Tasks Are Selected
-
-The `wg next` and `wg agent` commands score tasks by:
-
-1. **Skill match**: Tasks with matching requirements score higher
-2. **No missing skills**: Tasks where agent has all required skills get a bonus
-3. **Exec command**: Tasks with automation commands score higher
-4. **Trust level**: Verified agents get a small bonus
-5. **General tasks**: Tasks with no skill requirements are available to all
-
-```
-Score calculation:
-  +10 for each matched skill
-  -5 for each missing required skill
-  +20 if all required skills matched
-  +5 if task has no skill requirements
-  +15 if task has exec command
-  +5 for verified trust level
-```
-
-### Viewing Task Selection
+Enable auto-assign and the coordinator creates `assign-{task}` meta-tasks for unassigned ready tasks. The assigner agent picks from available agents based on the task's requirements.
 
 ```bash
-# See what task would be selected
-wg next --actor claude-main
-
-# Output:
-# Next task for claude-main:
-#   implement-api - Implement API endpoints
-#   Skills: rust, api-design (all matched)
-#   Inputs: docs/api-spec.md
-#   Deliverables: src/api/
+wg config --auto-assign true
+wg config --assigner-model haiku   # cheap model is fine for assignment
 ```
+
+### Automatic evaluation
+
+Enable auto-evaluate and the coordinator creates `evaluate-{task}` meta-tasks for completed tasks. The evaluator scores the work across four dimensions and updates performance records.
+
+```bash
+wg config --auto-evaluate true
+wg config --evaluator-model opus   # strong model for quality evaluation
+```
+
+See [AGENCY.md](AGENCY.md) for the full agency system documentation.
 
 ---
 
 ## Manual Agent Operation
 
-For AI assistants (like Claude Code) that work interactively:
+For AI assistants (like Claude Code) working interactively on a claimed task:
 
 ### Protocol
 
@@ -276,9 +165,10 @@ For AI assistants (like Claude Code) that work interactively:
    wg claim <task-id> --actor claude
    ```
 
-3. **View task details**
+3. **View task details and context**
    ```bash
    wg show <task-id>
+   wg context <task-id>
    ```
 
 4. **Do the work** (coding, documentation, etc.)
@@ -288,408 +178,255 @@ For AI assistants (like Claude Code) that work interactively:
    wg log <task-id> "Completed implementation" --actor claude
    ```
 
-6. **Mark complete or failed**
+6. **Record artifacts**
+   ```bash
+   wg artifact <task-id> src/feature.rs
+   ```
+
+7. **Mark complete or failed**
    ```bash
    wg done <task-id>
-   # or
-   wg fail <task-id> --reason "Blocked by missing dependency"
+   # or for verified tasks:
+   wg submit <task-id>
+   # or if blocked:
+   wg fail <task-id> --reason "Missing dependency"
    ```
 
-7. **Check what's unblocked**
-   ```bash
-   wg ready
-   ```
+### Integrating with Claude Code
 
-### Example Session
+Add to `CLAUDE.md`:
+
+```markdown
+Use workgraph for task management.
+
+At the start of each session, run `wg quickstart` to orient yourself.
+Use `wg service start` to dispatch work — do not manually claim tasks.
+```
+
+For spawned agents (subagents), the service injects task context and completion instructions into the prompt automatically.
+
+---
+
+## The Autonomous Agent Loop
+
+### Running the loop
 
 ```bash
-$ wg ready
-Ready tasks (3):
-  design-api - Design API schema (4h)
-  setup-ci - Configure CI pipeline (2h)
-  write-readme - Write README (1h)
+# Run continuously
+wg agent run --actor claude-main
 
-$ wg claim design-api --actor claude
-Claimed: design-api
+# Run single iteration
+wg agent run --actor claude-main --once
 
-$ wg show design-api
-Task: design-api
-Title: Design API schema
-Status: in-progress
-Assigned: claude
-...
+# Custom interval and task limit
+wg agent run --actor claude-main --interval 30 --max-tasks 10
+```
 
-# (do the work)
+### The wake/check/work/sleep cycle
 
-$ wg log design-api "Defined REST endpoints for users, posts, comments"
-Log added
+```
+     ┌──────────────────────────────────────┐
+     │                                      │
+     v                                      │
+   WAKE                                     │
+     │  Record heartbeat                    │
+     v                                      │
+   CHECK                                    │
+     │  Find ready tasks                    │
+     │  Match to agent capabilities         │
+     │  Select best task                    │
+     ├──── No work? ───────────────────────>│
+     v                                      │
+   WORK                                     │
+     │  Claim task                          │
+     │  Execute (if exec command set)       │
+     │  Mark done or failed                 │
+     v                                      │
+   SLEEP ──────────────────────────────────>┘
+```
 
-$ wg done design-api
-Done: design-api
-Newly unblocked:
-  implement-api
-  write-api-docs
+### Actor registration
+
+Each agent needs an actor record:
+
+```bash
+wg actor add agent-1 \
+  --name "Claude Agent 1" \
+  --role agent \
+  --trust-level provisional \
+  -c coding \
+  -c documentation \
+  -c testing
+```
+
+### Tasks with exec commands
+
+For fully automated execution, attach shell commands to tasks:
+
+```bash
+wg exec run-tests --set "cargo test"
+wg exec build --set "cargo build --release"
+```
+
+The agent loop runs these automatically. Tasks without exec commands are claimed but left for external completion (e.g., by an AI coding assistant).
+
+---
+
+## Task Selection
+
+### How tasks are scored
+
+The `wg next` and agent loop commands score ready tasks by:
+
+| Factor | Score |
+|--------|-------|
+| Each matched skill | +10 |
+| Each missing required skill | -5 |
+| All required skills matched | +20 |
+| No skill requirements (general task) | +5 |
+| Task has exec command | +15 |
+| Verified trust level | +5 |
+
+```bash
+wg next --actor claude-main
+# Next task for claude-main:
+#   implement-api - Implement API endpoints
+#   Skills: rust, api-design (all matched)
 ```
 
 ---
 
 ## Multi-Agent Coordination
 
-### Parallel Execution
+### Parallel execution
 
-Multiple agents can work simultaneously on independent tasks:
+Multiple agents work simultaneously on independent tasks. The service handles this automatically:
 
 ```bash
-# See what can run in parallel
-wg coordinate --max-parallel 4
-
-# Output:
-# Parallel execution slots (4 available):
-#   1. implement-api (rust, api-design)
-#   2. write-docs (documentation)
-#   3. setup-ci (devops)
-#   4. design-ui (frontend)
+wg service start --max-agents 4
+wg agents    # see who's working on what
 ```
 
-### Claim Atomicity
+### Claim atomicity
 
-Claims are atomic - if two agents try to claim the same task, only one succeeds:
+Claims are atomic — if two agents try to claim the same task, only one succeeds. The graph is protected by flock-based file locking.
 
-```bash
-# Agent 1
-$ wg claim implement-api --actor agent-1
-Claimed: implement-api
+### Heartbeats and dead agent detection
 
-# Agent 2 (simultaneous)
-$ wg claim implement-api --actor agent-2
-Error: Task 'implement-api' is already claimed by agent-1
-```
-
-### Heartbeats and Dead Agent Detection
-
-Agents record heartbeats to indicate they're alive:
+Agents send heartbeats while working. If an agent's process exits or its heartbeat goes stale (default: 5 minutes), the coordinator marks it dead and unclaims its task so another agent can pick it up.
 
 ```bash
-# Record heartbeat (done automatically by wg agent)
-wg heartbeat agent-1
-
-# Check for dead agents
-wg heartbeat --check --threshold 5
-
-# Output:
-# Stale agents (no heartbeat in 5 minutes):
-#   agent-2 (last seen: 2026-01-15T10:00:00Z, claimed: implement-api)
-```
-
-### Reclaiming Dead Agent Work
-
-If an agent dies with claimed tasks:
-
-```bash
-# Unclaim the task
-wg unclaim implement-api
-
-# Or reassign
-wg claim implement-api --actor agent-3
+wg dead-agents --check      # check without modifying
+wg dead-agents --cleanup    # mark dead and unclaim tasks
 ```
 
 ---
 
 ## Context and Trajectories
 
-### Context Inheritance
+### Context inheritance
 
-Tasks can specify inputs (what they need) and deliverables (what they produce):
-
-```bash
-wg add "Design API" \
-  --deliverable docs/api-spec.md
-
-wg add "Implement API" \
-  --blocked-by design-api \
-  --input docs/api-spec.md \
-  --deliverable src/api/
-```
-
-View available context:
+Tasks can specify inputs and deliverables. When dependencies complete, their artifacts and deliverables become available context:
 
 ```bash
 wg context implement-api
-
-# Output:
 # Context for implement-api:
 #   From design-api (done):
-#     Artifacts:
-#       docs/api-spec.md
-#     Deliverables:
-#       docs/api-spec.md
+#     Artifacts: docs/api-spec.md
 ```
 
-### Trajectory Planning
+### Trajectory planning
 
 For AI agents with limited context windows, trajectories minimize context switching:
 
 ```bash
 wg trajectory implement-api --actor claude-main
-
-# Output:
-# Optimal trajectory from implement-api:
-#   1. implement-api (uses: src/, docs/api-spec.md)
-#   2. write-api-tests (uses: src/, test/)
-#   3. update-api-docs (uses: docs/, src/api/)
-#
-# Context overlap: 85%
-# Estimated tokens: 45000
-```
-
-The trajectory groups related tasks that share context (files, directories, concepts).
-
----
-
-## Configuration
-
-### Config File
-
-`.workgraph/config.toml`:
-
-```toml
-[agent]
-# AI executor: claude, opencode, codex, shell
-executor = "claude"
-
-# Model for AI execution
-model = "opus-4-5"
-
-# Seconds between agent loop iterations
-interval = 10
-
-# Stop after this many tasks (optional)
-max_tasks = 100
-
-# Minutes without heartbeat = dead agent
-heartbeat_timeout = 5
-
-# Command template for AI execution
-# Placeholders: {model}, {prompt}, {task_id}, {workdir}
-command_template = "claude --model {model} --print \"{prompt}\""
-
-[project]
-name = "My Project"
-description = "Project description"
-default_skills = ["coding", "documentation"]
-```
-
-### Runtime Configuration
-
-```bash
-# View current config
-wg config --show
-
-# Set executor
-wg config --executor opencode
-
-# Set interval
-wg config --set-interval 30
-
-# Initialize default config
-wg config --init
+# Groups related tasks that share context (files, directories)
 ```
 
 ---
 
-## Monitoring Agents
+## Model Selection
 
-### Check Agent Status
+Models are selected in priority order:
 
-```bash
-# List actors with last_seen
-wg actor list --json | jq '.[] | select(.role == "agent")'
+1. `--model` flag on `wg spawn` (highest priority)
+2. Task's `model` field (set with `wg add --model` or `wg edit --model`)
+3. `coordinator.model` in config.toml
+4. `agent.model` in config.toml (lowest priority)
 
-# Check for stale agents
-wg heartbeat --check
-
-# View workload distribution
-wg workload
-```
-
-### View Agent Activity
+For agency meta-tasks, separate model settings apply:
+- `agency.assigner_model` for assignment tasks
+- `agency.evaluator_model` for evaluation tasks
+- `agency.evolver_model` for evolution
 
 ```bash
-# Tasks claimed by an agent
-wg list --json | jq '.[] | select(.assigned == "claude-main")'
+# Per-task model at creation
+wg add "Simple fix" --model haiku
 
-# Recent completions
-wg list --status done --json | jq 'sort_by(.completed_at) | reverse | .[0:5]'
+# Change model on existing task
+wg edit my-task --model sonnet
+
+# Set coordinator default
+wg config --model sonnet
+wg service reload
 ```
 
-### Agent Statistics
+---
 
-After `wg agent` completes:
+## Monitoring
 
+### Check service status
+
+```bash
+wg service status    # daemon info, coordinator state
+wg agents            # all agents with status
+wg agents --alive    # running only
+wg agents --dead     # dead only
 ```
-Agent statistics:
-  Iterations: 15
-  Tasks completed: 12
-  Tasks failed: 1
-  Idle iterations: 2
+
+### View agent work
+
+```bash
+wg list --status in-progress   # tasks being worked on
+wg show <task-id>              # full task details
+wg log <task-id> --list        # progress log
 ```
 
-With `--json`:
+### Interactive dashboard
 
-```json
-{
-  "iterations": 15,
-  "tasks_completed": 12,
-  "tasks_failed": 1,
-  "idle_iterations": 2
-}
+```bash
+wg tui    # split-pane view of tasks, agents, and logs
+```
+
+### Quick project overview
+
+```bash
+wg status     # one-screen summary
+wg analyze    # comprehensive health report
 ```
 
 ---
 
 ## Best Practices
 
-### Task Design
+### Task design
 
-1. **Use clear skill requirements**: Help task selection match agents to appropriate work
-   ```bash
-   wg add "Implement auth" --skill rust --skill security
-   ```
+- **Use `--model` for cost control**: haiku for simple tasks, opus for complex ones
+- **Use `--verify` for critical tasks**: require human approval before completion
+- **Specify skills**: helps task selection match agents to appropriate work
+- **Specify inputs and deliverables**: enables context inheritance
 
-2. **Specify inputs and deliverables**: Enable context inheritance
-   ```bash
-   wg add "Write tests" --input src/auth.rs --deliverable tests/auth_test.rs
-   ```
+### Service operation
 
-3. **Add exec commands for automation**: Enable fully autonomous execution
-   ```bash
-   wg exec run-tests --set "cargo test"
-   ```
+- **Start with a low `max_agents`**: 2-4 is usually enough. More agents means more concurrent API costs.
+- **Use `wg service pause`**: when deploying or making manual changes
+- **Monitor with `wg tui`**: see what's happening in real time
+- **Check `wg service status`**: after any issues to see coordinator state
 
-4. **Use max_retries for flaky tasks**:
-   ```bash
-   wg add "Deploy to staging" --max-retries 3
-   ```
+### Agency
 
-### Agent Operation
-
-1. **Start with `--once`**: Test agent behavior before continuous operation
-   ```bash
-   wg agent --actor claude --once
-   ```
-
-2. **Use appropriate intervals**: Too short wastes resources, too long delays work
-   ```bash
-   wg agent --actor claude --interval 30
-   ```
-
-3. **Monitor heartbeats**: Detect dead agents quickly
-   ```bash
-   wg heartbeat --check --threshold 3
-   ```
-
-4. **Log progress**: Create audit trail of agent work
-   ```bash
-   wg log task-id "Implemented feature X" --actor claude
-   ```
-
-### Multi-Agent Setups
-
-1. **Specialize agents**: Give different agents different capabilities
-   ```bash
-   wg actor add agent-code -c rust -c python
-   wg actor add agent-docs -c documentation -c review
-   wg actor add agent-test -c testing -c qa
-   ```
-
-2. **Use coordinate for dispatch**: See what can run in parallel
-   ```bash
-   wg coordinate --max-parallel 3
-   ```
-
-3. **Handle failures gracefully**: Failed tasks can be retried
-   ```bash
-   wg retry failed-task
-   ```
-
-### Integration with AI Assistants
-
-For interactive AI assistants (Claude Code, Cursor, etc.):
-
-1. **Add CLAUDE.md instructions**:
-   ```markdown
-   # Agent Protocol
-   1. Check `wg ready` before starting work
-   2. Claim tasks: `wg claim <id> --actor claude`
-   3. When done: `wg done <id>`
-   4. If you discover new work, add it: `wg add "..." --blocked-by X`
-   ```
-
-2. **Use show for context**:
-   ```bash
-   wg show task-id  # Get full task details
-   wg context task-id  # Get inherited context
-   ```
-
-3. **Track progress**:
-   ```bash
-   wg log task-id "Working on X"
-   wg log task-id "Completed Y, moving to Z"
-   ```
-
----
-
-## JSON Output Examples
-
-### Ready Tasks
-
-```bash
-wg ready --json
-```
-
-```json
-[
-  {
-    "id": "implement-api",
-    "title": "Implement API endpoints",
-    "hours": 8,
-    "skills": ["rust", "api-design"],
-    "inputs": ["docs/api-spec.md"],
-    "deliverables": ["src/api/"]
-  }
-]
-```
-
-### Next Task
-
-```bash
-wg next --actor claude --json
-```
-
-```json
-{
-  "task": {
-    "id": "implement-api",
-    "title": "Implement API endpoints",
-    "skills": ["rust", "api-design"]
-  },
-  "score": 45,
-  "matched_skills": ["rust", "api-design"],
-  "missing_skills": []
-}
-```
-
-### Agent Stats
-
-```bash
-wg agent --actor claude --once --json
-```
-
-```json
-{
-  "iterations": 1,
-  "tasks_completed": 1,
-  "tasks_failed": 0,
-  "idle_iterations": 0
-}
-```
+- **Start without auto-assign/auto-evaluate**: manually assign and evaluate first to understand the system
+- **Use cheap models for assignment**: haiku is fine for picking which agent works on what
+- **Use strong models for evaluation**: opus gives more accurate quality scores
+- **Run `wg evolve --dry-run` first**: preview evolution proposals before applying them

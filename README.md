@@ -66,9 +66,25 @@ wg add "Implement auth" \
   --skill rust \
   --skill security \
   --deliverable src/auth.rs
+
+# Task with per-task model override
+wg add "Quick formatting fix" --model haiku
+
+# Task requiring review before completion
+wg add "Security audit" --verify "All findings documented with severity ratings"
 ```
 
-### 3. Register yourself (or your agent)
+### 3. Edit tasks after creation
+
+```bash
+wg edit my-task --title "Better title"
+wg edit my-task --add-blocked-by other-task
+wg edit my-task --remove-tag stale --add-tag urgent
+wg edit my-task --model opus
+wg edit my-task --add-skill security --remove-skill docs
+```
+
+### 4. Register yourself (or your agent)
 
 ```bash
 # Human
@@ -78,7 +94,7 @@ wg actor add erik --name "Erik" --role engineer -c rust -c python
 wg actor add claude --name "Claude" --role agent -c coding -c testing -c docs
 ```
 
-### 4. Start working
+### 5. Start working
 
 ```bash
 # Service mode (recommended) — auto-spawns agents on ready tasks
@@ -239,14 +255,21 @@ The service reads from `.workgraph/config.toml`:
 ```toml
 [coordinator]
 max_agents = 4         # max parallel agents (default: 4)
-poll_interval = 60     # seconds between coordinator ticks (default: 60)
+poll_interval = 60     # seconds between safety-net ticks (default: 60)
 executor = "claude"    # executor for spawned agents (default: "claude")
-model = "opus-4-5"    # model override for all spawned agents (optional)
+model = "opus"         # model override for all spawned agents (optional)
 
 [agent]
 executor = "claude"
-model = "opus-4-5"
+model = "opus"         # default model (default: "opus")
 heartbeat_timeout = 5  # minutes before agent is considered dead (default: 5)
+
+[agency]
+auto_evaluate = false    # auto-create evaluation tasks on completion
+auto_assign = false      # auto-create identity assignment tasks
+assigner_model = "haiku" # model for assigner agents
+evaluator_model = "opus" # model for evaluator agents
+evolver_model = "opus"   # model for evolver agents
 ```
 
 Set config values with:
@@ -256,6 +279,13 @@ wg config --max-agents 8
 wg config --model sonnet
 wg config --poll-interval 120
 wg config --executor shell
+
+# Agency settings
+wg config --auto-evaluate true
+wg config --auto-assign true
+wg config --assigner-model haiku
+wg config --evaluator-model opus
+wg config --evolver-model opus
 ```
 
 CLI flags on `wg service start` override config.toml:
@@ -274,6 +304,8 @@ wg service start --max-agents 8 --executor shell --interval 120 --model haiku
 | `wg service stop --force` | Immediately SIGKILL the daemon |
 | `wg service status` | Show daemon PID, uptime, agent summary, coordinator state |
 | `wg service reload` | Re-read config.toml without restarting |
+| `wg service pause` | Pause coordinator (running agents continue, no new spawns) |
+| `wg service resume` | Resume coordinator (immediate tick) |
 | `wg service install` | Generate a systemd user service file |
 
 Reload lets you change settings at runtime:
@@ -319,14 +351,17 @@ wg dead-agents --remove    # remove dead agents from registry
 Models are selected in priority order:
 
 1. `--model` flag on `wg spawn` (highest priority)
-2. Task's `--model` property (set at creation)
+2. Task's `model` property (set with `wg add --model` or `wg edit --model`)
 3. Coordinator config (`coordinator.model` in config.toml)
 4. Agent config default (`agent.model` in config.toml)
 
 ```bash
-# Set model per-task
+# Set model per-task at creation
 wg add "Simple fix" --model haiku
 wg add "Complex design" --model opus
+
+# Change model on an existing task
+wg edit my-task --model sonnet
 
 # Override at spawn time
 wg spawn my-task --executor claude --model haiku
@@ -420,6 +455,62 @@ wg service status
 | `coordinator-state.json` | Effective config and runtime metrics |
 | `registry.json` | Agent registry (IDs, PIDs, tasks, status) |
 
+## Agency system
+
+The agency system gives agents composable identities — a **role** (what it does) paired with a **motivation** (why it acts that way). Instead of every spawned agent being a generic assistant, the agency system lets you define specialized agents that are evaluated and evolved over time.
+
+### Quick start
+
+```bash
+# Seed built-in starter roles and motivations
+wg agency init
+
+# Create an agent pairing
+wg agent create "Careful Coder" --role <role-hash> --motivation <motivation-hash>
+
+# Assign the agent identity to a task
+wg assign my-task <agent-hash>
+
+# When the service spawns that task, the agent's identity is injected into its prompt
+```
+
+### What it does
+
+1. **Roles** define skills and desired outcomes ("Programmer" → working, tested code)
+2. **Motivations** define trade-offs and constraints ("Careful" → prioritizes reliability, rejects untested code)
+3. **Agents** pair one role + one motivation into a named identity
+4. **Assignment** binds an agent to a task — its identity is injected at spawn time
+5. **Evaluation** scores completed tasks across four dimensions (correctness, completeness, efficiency, style adherence)
+6. **Evolution** uses performance data to create new roles/motivations and retire weak ones
+
+### Automation
+
+Enable auto-assign and auto-evaluate to run the full loop without manual intervention:
+
+```bash
+wg config --auto-assign true     # auto-creates assignment tasks for ready work
+wg config --auto-evaluate true   # auto-creates evaluation tasks on completion
+wg config --assigner-model haiku # cheap model for assignment decisions
+wg config --evaluator-model opus # strong model for quality evaluation
+wg config --evolver-model opus   # strong model for evolution decisions
+```
+
+When the coordinator ticks, it automatically creates `assign-{task}` and `evaluate-{task}` meta-tasks that are dispatched like any other work.
+
+### Evolution
+
+```bash
+wg evolve                              # full evolution cycle
+wg evolve --strategy mutation --budget 3  # targeted changes
+wg evolve --dry-run                    # preview without applying
+```
+
+See [docs/AGENCY.md](docs/AGENCY.md) for the full agency system documentation.
+
+## Graph locking
+
+Workgraph uses `flock`-based file locking to prevent concurrent modifications when multiple agents or the coordinator are writing to the graph simultaneously. This is automatic — no user action required. The lock is acquired for each write operation and released immediately after.
+
 ## The recommended flow
 
 For most projects:
@@ -448,6 +539,7 @@ For most projects:
 4. **Adapt**: As you learn more, update the graph — the service picks up changes
    ```bash
    wg add "New thing we discovered" --blocked-by whatever
+   wg edit stuck-task --add-tag needs-rethink
    wg fail stuck-task --reason "Need to rethink this"
    wg retry stuck-task  # when ready to try again
    ```
@@ -456,15 +548,17 @@ For most projects:
 
 ## Key concepts
 
-**Tasks** have a status (`open`, `in-progress`, `done`, `failed`, `abandoned`) and can block other tasks.
+**Tasks** have a status (`open`, `in-progress`, `done`, `failed`, `abandoned`, `pending-review`) and can block other tasks. Tasks can carry a per-task `model` override and an `agent` identity assignment.
 
 **Actors** are humans or AI agents. They claim tasks to work on them.
 
-**The graph** is tasks connected by "blocked-by" relationships. A task is blocked until all its blockers are done.
+**The graph** is tasks connected by "blocked-by" relationships. A task is blocked until all its blockers are done. Concurrent writes are protected by flock-based file locking.
 
 **Context flow**: Tasks can declare inputs (what they need) and deliverables (what they produce). Use `wg context <task>` to see what's available.
 
 **Trajectories**: For AI agents, `wg trajectory <task>` suggests the best order to claim related tasks, minimizing context switches.
+
+**Agency**: Composable agent identities (role + motivation) that are assigned to tasks, evaluated after completion, and evolved over time based on performance data.
 
 ## Analysis commands
 
@@ -478,6 +572,8 @@ wg bottlenecks     # tasks blocking the most work
 wg critical-path   # longest dependency chain
 wg forecast        # when will we be done?
 wg analyze         # comprehensive health report
+wg status          # quick one-screen overview
+wg dag             # ASCII dependency graph
 ```
 
 ## Storage
@@ -486,7 +582,7 @@ Everything lives in `.workgraph/graph.jsonl`. One JSON object per line. Human-re
 
 ```jsonl
 {"kind":"task","id":"design-api","title":"Design the API","status":"done"}
-{"kind":"task","id":"build-backend","title":"Build the backend","status":"open","blocked_by":["design-api"]}
+{"kind":"task","id":"build-backend","title":"Build the backend","status":"open","blocked_by":["design-api"],"model":"sonnet"}
 {"kind":"actor","id":"claude","name":"Claude","role":"agent","capabilities":["coding","testing"]}
 ```
 
@@ -495,17 +591,38 @@ Configuration is in `.workgraph/config.toml`:
 ```toml
 [agent]
 executor = "claude"
-model = "opus-4-5"
+model = "opus"
 interval = 10
+
+[coordinator]
+max_agents = 4
+poll_interval = 60
+
+[agency]
+auto_evaluate = false
+auto_assign = false
 
 [project]
 name = "My Project"
+```
+
+Agency data lives in `.workgraph/agency/`:
+
+```
+.workgraph/agency/
+  roles/           # Role YAML files (keyed by content-hash)
+  motivations/     # Motivation YAML files
+  agents/          # Agent YAML files (role+motivation pairings)
+  evaluations/     # Evaluation records (JSON)
+  evolver-skills/  # Strategy-specific skill documents for evolution
 ```
 
 ## More docs
 
 - [docs/COMMANDS.md](docs/COMMANDS.md) - Complete command reference
 - [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) - Deep dive on agent operation
+- [docs/AGENT-SERVICE.md](docs/AGENT-SERVICE.md) - Service architecture and coordinator lifecycle
+- [docs/AGENCY.md](docs/AGENCY.md) - Agency system: roles, motivations, evaluation, evolution
 
 ## License
 

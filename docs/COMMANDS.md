@@ -8,7 +8,9 @@ Complete reference for all `wg` commands. All commands support `--json` for mach
 - [Query Commands](#query-commands)
 - [Analysis Commands](#analysis-commands)
 - [Actor and Resource Management](#actor-and-resource-management)
+- [Agency Commands](#agency-commands)
 - [Agent Commands](#agent-commands)
+- [Service Commands](#service-commands)
 - [Utility Commands](#utility-commands)
 
 ---
@@ -31,7 +33,7 @@ wg add <TITLE> [OPTIONS]
 |--------|-------------|
 | `--id <ID>` | Custom task ID (auto-generated from title if not provided) |
 | `-d, --description <TEXT>` | Detailed description, acceptance criteria |
-| `--blocked-by <ID>` | Add dependency on another task (repeatable) |
+| `--blocked-by <ID>` | Add dependency on another task (repeatable, comma-separated) |
 | `--assign <ACTOR>` | Assign to an actor |
 | `--hours <N>` | Estimated hours |
 | `--cost <N>` | Estimated cost |
@@ -40,6 +42,8 @@ wg add <TITLE> [OPTIONS]
 | `--input <PATH>` | Input file/context needed (repeatable) |
 | `--deliverable <PATH>` | Expected output (repeatable) |
 | `--max-retries <N>` | Maximum retry attempts |
+| `--model <MODEL>` | Preferred model for this task (haiku, sonnet, opus) |
+| `--verify <CRITERIA>` | Verification criteria — task requires review before done |
 
 **Examples:**
 
@@ -56,8 +60,52 @@ wg add "Implement user auth" \
   --skill security \
   --deliverable src/auth.rs
 
-# Task with custom ID
-wg add "Design database schema" --id db-schema
+# Task with model override
+wg add "Quick formatting fix" --model haiku
+
+# Task requiring review
+wg add "Security audit" --verify "All findings documented with severity ratings"
+```
+
+---
+
+### `wg edit`
+
+Modify an existing task's fields without replacing it.
+
+```bash
+wg edit <ID> [OPTIONS]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <TEXT>` | Update task title |
+| `-d, --description <TEXT>` | Update task description |
+| `--add-blocked-by <ID>` | Add a blocked-by dependency (repeatable) |
+| `--remove-blocked-by <ID>` | Remove a blocked-by dependency (repeatable) |
+| `--add-tag <TAG>` | Add a tag (repeatable) |
+| `--remove-tag <TAG>` | Remove a tag (repeatable) |
+| `--add-skill <SKILL>` | Add a required skill (repeatable) |
+| `--remove-skill <SKILL>` | Remove a required skill (repeatable) |
+| `--model <MODEL>` | Update preferred model |
+
+Triggers a `graph_changed` IPC notification to the service daemon, so the coordinator picks up changes immediately.
+
+**Examples:**
+
+```bash
+# Change title
+wg edit my-task --title "Better title"
+
+# Add a dependency
+wg edit my-task --add-blocked-by other-task
+
+# Swap tags
+wg edit my-task --remove-tag stale --add-tag urgent
+
+# Change model
+wg edit my-task --model opus
 ```
 
 ---
@@ -70,12 +118,59 @@ Mark a task as completed.
 wg done <ID>
 ```
 
-Sets status to `done`, records `completed_at` timestamp, and unblocks dependent tasks.
+Sets status to `done`, records `completed_at` timestamp, and unblocks dependent tasks. Fails for verified tasks (use `wg submit` instead).
 
 **Example:**
 ```bash
 wg done design-api
 # Automatically unblocks tasks that were waiting on design-api
+```
+
+---
+
+### `wg submit`
+
+Submit a verified task for review.
+
+```bash
+wg submit <ID> [--actor <ACTOR>]
+```
+
+Sets status to `pending-review`. Used for tasks created with `--verify` that require approval before completion.
+
+**Example:**
+```bash
+wg submit security-audit --actor claude
+```
+
+---
+
+### `wg approve`
+
+Approve a pending-review task (marks as done).
+
+```bash
+wg approve <ID> [--actor <ACTOR>]
+```
+
+**Example:**
+```bash
+wg approve security-audit --actor erik
+```
+
+---
+
+### `wg reject`
+
+Reject a pending-review task (returns to open for rework).
+
+```bash
+wg reject <ID> [--reason <TEXT>] [--actor <ACTOR>]
+```
+
+**Example:**
+```bash
+wg reject security-audit --reason "Missing OWASP top 10 coverage" --actor erik
 ```
 
 ---
@@ -87,11 +182,6 @@ Mark a task as failed (can be retried later).
 ```bash
 wg fail <ID> [--reason <TEXT>]
 ```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--reason <TEXT>` | Explanation of why the task failed |
 
 **Example:**
 ```bash
@@ -108,7 +198,7 @@ Mark a task as abandoned (will not be completed).
 wg abandon <ID> [--reason <TEXT>]
 ```
 
-Abandoned is a terminal state - the task will not be retried.
+Abandoned is a terminal state — the task will not be retried.
 
 **Example:**
 ```bash
@@ -127,11 +217,6 @@ wg retry <ID>
 
 Increments the retry counter and sets status back to `open`.
 
-**Example:**
-```bash
-wg retry deploy-prod
-```
-
 ---
 
 ### `wg claim`
@@ -142,17 +227,7 @@ Claim a task for work (sets status to in-progress).
 wg claim <ID> [--actor <ACTOR>]
 ```
 
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--actor <ACTOR>` | Actor claiming the task |
-
 Claiming sets `started_at` timestamp and assigns the task. Prevents double-work in multi-agent scenarios.
-
-**Example:**
-```bash
-wg claim implement-api --actor erik
-```
 
 ---
 
@@ -164,11 +239,14 @@ Release a claimed task back to open status.
 wg unclaim <ID>
 ```
 
-Useful when interrupted or handing off work.
+---
 
-**Example:**
+### `wg reclaim`
+
+Reclaim a task from a dead/unresponsive agent.
+
 ```bash
-wg unclaim implement-api
+wg reclaim <ID> --from <ACTOR> --to <ACTOR>
 ```
 
 ---
@@ -187,11 +265,27 @@ wg log <ID> --list
 
 **Examples:**
 ```bash
-# Log progress
 wg log implement-api "Completed endpoint handlers" --actor erik
-
-# View all log entries
 wg log implement-api --list
+```
+
+---
+
+### `wg assign`
+
+Assign an agent identity to a task (or clear the assignment).
+
+```bash
+wg assign <TASK> <AGENT-HASH>    # Assign agent to task
+wg assign <TASK> --clear         # Remove assignment
+```
+
+When the service spawns that task, the agent's role and motivation are injected into the prompt. The agent hash can be a prefix (minimum 4 characters).
+
+**Example:**
+```bash
+wg assign my-task a3f7c21d
+wg assign my-task --clear
 ```
 
 ---
@@ -204,34 +298,7 @@ Display detailed information about a single task.
 wg show <ID>
 ```
 
-Shows all task fields including description, logs, timestamps, and dependencies.
-
-**Example output:**
-```
-Task: implement-api
-Title: Implement API endpoints
-Status: in-progress
-Assigned: erik
-
-Description:
-  Create REST API endpoints for user management
-
-Estimate: 8h
-
-Blocked by:
-  design-api (done)
-
-Blocks:
-  write-tests
-  deploy-staging
-
-Skills: rust, api-design
-Inputs: docs/api-spec.md
-Deliverables: src/api/
-
-Created: 2026-01-15T10:00:00Z
-Started: 2026-01-16T09:00:00Z
-```
+Shows all task fields including description, logs, timestamps, dependencies, model, and agent assignment.
 
 ---
 
@@ -248,19 +315,7 @@ wg list [--status <STATUS>]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--status <STATUS>` | Filter by status (open, in-progress, done, failed, abandoned) |
-
-**Examples:**
-```bash
-# All tasks
-wg list
-
-# Only open tasks
-wg list --status open
-
-# JSON output
-wg list --json
-```
+| `--status <STATUS>` | Filter by status (open, in-progress, done, failed, abandoned, pending-review) |
 
 ---
 
@@ -274,14 +329,6 @@ wg ready
 
 Shows only open tasks where all dependencies are done and any `not_before` timestamp has passed.
 
-**Example output:**
-```
-Ready tasks (3):
-  implement-api - Implement API endpoints (8h)
-  write-docs - Write documentation (4h)
-  setup-ci - Configure CI pipeline (2h)
-```
-
 ---
 
 ### `wg blocked`
@@ -291,8 +338,6 @@ Show direct blockers of a task.
 ```bash
 wg blocked <ID>
 ```
-
-Lists only immediate (not transitive) blockers that are incomplete.
 
 ---
 
@@ -304,14 +349,6 @@ Show the full transitive chain explaining why a task is blocked.
 wg why-blocked <ID>
 ```
 
-**Example output:**
-```
-deploy-prod is blocked by:
-  └─ run-tests (open)
-      └─ implement-api (in-progress)
-          └─ design-api (done) ✓
-```
-
 ---
 
 ### `wg impact`
@@ -320,20 +357,6 @@ Show what tasks depend on a given task (forward analysis).
 
 ```bash
 wg impact <ID>
-```
-
-**Example output:**
-```
-impact of design-api:
-  Direct dependents (2):
-    implement-api
-    write-docs
-
-  Transitive dependents (5):
-    run-tests
-    deploy-staging
-    deploy-prod
-    ...
 ```
 
 ---
@@ -351,7 +374,15 @@ wg context <ID> [--dependents]
 |--------|-------------|
 | `--dependents` | Also show tasks that will consume this task's outputs |
 
-Shows artifacts and deliverables from completed blockers that can inform the task.
+---
+
+### `wg status`
+
+Quick one-screen status overview of the project.
+
+```bash
+wg status
+```
 
 ---
 
@@ -365,16 +396,6 @@ Find tasks blocking the most downstream work.
 wg bottlenecks
 ```
 
-Ranks tasks by impact - completing high-impact bottlenecks unblocks the most work.
-
-**Example output:**
-```
-Bottlenecks (tasks blocking most work):
-  1. design-api - blocks 12 tasks (42h estimated)
-  2. setup-infra - blocks 8 tasks (24h estimated)
-  3. define-schema - blocks 5 tasks (16h estimated)
-```
-
 ---
 
 ### `wg critical-path`
@@ -383,16 +404,6 @@ Show the longest dependency chain (determines minimum project duration).
 
 ```bash
 wg critical-path
-```
-
-**Example output:**
-```
-Critical path (5 tasks, 28h estimated):
-  design-api (4h)
-  └─ implement-api (8h)
-      └─ run-tests (4h)
-          └─ deploy-staging (4h)
-              └─ deploy-prod (8h)
 ```
 
 ---
@@ -405,25 +416,6 @@ Estimate project completion based on velocity and remaining work.
 wg forecast
 ```
 
-Uses historical completion rate to project when work will finish.
-
-**Example output:**
-```
-Project Forecast
-================
-Completed: 45 tasks
-Remaining: 23 tasks (68h estimated)
-
-Velocity (last 4 weeks):
-  Week -3: 8 tasks/week
-  Week -2: 12 tasks/week
-  Week -1: 10 tasks/week
-  Current: 6 tasks/week (partial)
-
-Average velocity: 10.5 tasks/week
-Estimated completion: ~2.2 weeks (Feb 8, 2026)
-```
-
 ---
 
 ### `wg velocity`
@@ -434,56 +426,24 @@ Show task completion velocity over time.
 wg velocity [--weeks <N>]
 ```
 
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--weeks <N>` | Number of weeks to show (default: 4) |
-
 ---
 
 ### `wg aging`
 
-Show task age distribution - how long tasks have been open.
+Show task age distribution — how long tasks have been open.
 
 ```bash
 wg aging
-```
-
-Identifies stale tasks that may need attention.
-
-**Example output:**
-```
-Task Age Distribution
-=====================
-< 1 day:   5 tasks
-1-7 days:  12 tasks
-1-4 weeks: 8 tasks
-> 1 month: 3 tasks (review recommended)
-
-Oldest tasks:
-  legacy-cleanup (45 days)
-  docs-update (32 days)
 ```
 
 ---
 
 ### `wg structure`
 
-Analyze graph structure - entry points, dead ends, high-impact roots.
+Analyze graph structure — entry points, dead ends, high-impact roots.
 
 ```bash
 wg structure
-```
-
-**Example output:**
-```
-Graph Structure
-===============
-Entry points (no blockers): 5 tasks
-Dead ends (nothing depends on them): 8 tasks
-High-impact roots: design-api, setup-infra
-
-Orphan references: none
 ```
 
 ---
@@ -496,8 +456,6 @@ Analyze cycles in the graph with classification.
 wg loops
 ```
 
-Identifies intentional cycles (iterative work) vs problematic cycles.
-
 ---
 
 ### `wg workload`
@@ -506,16 +464,6 @@ Show actor workload balance and assignment distribution.
 
 ```bash
 wg workload
-```
-
-**Example output:**
-```
-Actor Workload
-==============
-erik:      4 tasks (24h)  ████████
-alice:     2 tasks (8h)   ███
-agent-1:   6 tasks (12h)  ██████
-unassigned: 15 tasks
 ```
 
 ---
@@ -528,8 +476,6 @@ Comprehensive health report combining all analyses.
 wg analyze
 ```
 
-Runs bottlenecks, structure, aging, velocity, and other analyses together.
-
 ---
 
 ### `wg cost`
@@ -540,8 +486,6 @@ Calculate total cost of a task including all dependencies.
 wg cost <ID>
 ```
 
-Sums estimated costs transitively through the dependency graph.
-
 ---
 
 ### `wg plan`
@@ -550,17 +494,6 @@ Plan what can be accomplished with given resources.
 
 ```bash
 wg plan [--budget <N>] [--hours <N>]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--budget <N>` | Available budget in dollars |
-| `--hours <N>` | Available work hours |
-
-**Example:**
-```bash
-wg plan --hours 40
 ```
 
 ---
@@ -573,12 +506,21 @@ Show ready tasks for parallel execution dispatch.
 wg coordinate [--max-parallel <N>]
 ```
 
+---
+
+### `wg dag`
+
+Show ASCII DAG of the dependency graph.
+
+```bash
+wg dag [--all] [--status <STATUS>]
+```
+
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--max-parallel <N>` | Maximum parallel tasks to show |
-
-Useful for dispatching multiple agents to independent work.
+| `--all` | Include done tasks |
+| `--status <STATUS>` | Filter by status |
 
 ---
 
@@ -602,20 +544,8 @@ wg actor add <ID> [OPTIONS]
 | `-c, --capability <SKILL>` | Capability/skill (repeatable) |
 | `--context-limit <TOKENS>` | Max context size for AI agents |
 | `--trust-level <LEVEL>` | verified, provisional, or unknown |
-
-**Examples:**
-```bash
-# Human actor
-wg actor add erik --name "Erik" --role engineer -c rust -c design
-
-# AI agent
-wg actor add claude-1 \
-  --role agent \
-  --trust-level provisional \
-  --context-limit 200000 \
-  -c coding \
-  -c documentation
-```
+| `-t, --type <TYPE>` | Actor type: agent or human |
+| `--matrix <USER_ID>` | Matrix user ID for human actors (@user:server) |
 
 ---
 
@@ -634,21 +564,7 @@ wg actor list
 Add a new resource.
 
 ```bash
-wg resource add <ID> [OPTIONS]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--name <NAME>` | Display name |
-| `--type <TYPE>` | Resource type (money, compute, time) |
-| `--available <N>` | Available amount |
-| `--unit <UNIT>` | Unit (usd, hours, gpu-hours) |
-
-**Example:**
-```bash
-wg resource add budget --type money --available 10000 --unit usd
-wg resource add compute --type compute --available 100 --unit gpu-hours
+wg resource add <ID> [--name <NAME>] [--type <TYPE>] [--available <N>] [--unit <UNIT>]
 ```
 
 ---
@@ -678,22 +594,10 @@ wg resources
 List and find skills across tasks.
 
 ```bash
-wg skills [--task <ID>] [--find <SKILL>]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--task <ID>` | Show skills for a specific task |
-| `--find <SKILL>` | Find tasks requiring a specific skill |
-
-**Examples:**
-```bash
-# List all skills in use
-wg skills
-
-# Find tasks needing rust skills
-wg skills --find rust
+wg skill list           # list all skills in use
+wg skill task <ID>      # show skills for a specific task
+wg skill find <SKILL>   # find tasks requiring a specific skill
+wg skill install        # install the wg Claude Code skill to ~/.claude/skills/wg/
 ```
 
 ---
@@ -706,18 +610,159 @@ Find actors capable of performing a task.
 wg match <TASK>
 ```
 
-Matches task skill requirements against actor capabilities.
+---
+
+## Agency Commands
+
+The agency system manages composable agent identities (roles + motivations). See [AGENCY.md](AGENCY.md) for the full design.
+
+### `wg agency init`
+
+Seed the agency with starter roles (Programmer, Reviewer, Documenter, Architect) and motivations (Careful, Fast, Thorough, Balanced).
+
+```bash
+wg agency init
+```
+
+---
+
+### `wg agency stats`
+
+Display aggregated performance statistics across the agency.
+
+```bash
+wg agency stats [--min-evals <N>]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--min-evals <N>` | Minimum evaluations to consider a pair "explored" (default: 3) |
+
+Shows role leaderboard, motivation leaderboard, synergy matrix, tag breakdown, and under-explored combinations.
+
+---
+
+### `wg role`
+
+Manage roles — the "what" of agent identity.
+
+| Command | Description |
+|---------|-------------|
+| `wg role add <name> --outcome <text> [--skill <spec>] [-d <text>]` | Create a new role |
+| `wg role list` | List all roles |
+| `wg role show <id>` | Show details of a role |
+| `wg role edit <id>` | Edit a role in `$EDITOR` (re-hashes on save) |
+| `wg role rm <id>` | Delete a role |
+| `wg role lineage <id>` | Show evolutionary ancestry |
+
+**Skill specifications:**
+- `rust` — simple name tag
+- `coding:file:///path/to/style.md` — load content from file
+- `review:https://example.com/checklist.md` — fetch from URL
+- `tone:inline:Write in a clear, technical style` — inline content
+
+---
+
+### `wg motivation`
+
+Manage motivations — the "why" of agent identity. Also aliased as `wg mot`.
+
+| Command | Description |
+|---------|-------------|
+| `wg motivation add <name> --accept <text> --reject <text> [-d <text>]` | Create a new motivation |
+| `wg motivation list` | List all motivations |
+| `wg motivation show <id>` | Show details |
+| `wg motivation edit <id>` | Edit in `$EDITOR` (re-hashes on save) |
+| `wg motivation rm <id>` | Delete a motivation |
+| `wg motivation lineage <id>` | Show evolutionary ancestry |
+
+---
+
+### `wg agent create`
+
+Create a new agent (role + motivation pairing).
+
+```bash
+wg agent create <NAME> --role <ROLE-ID> --motivation <MOTIVATION-ID>
+```
+
+IDs can be prefixes (minimum unique match).
+
+---
+
+### `wg agent list|show|rm|lineage|performance`
+
+| Command | Description |
+|---------|-------------|
+| `wg agent list` | List all agents |
+| `wg agent show <id>` | Show agent details with resolved role/motivation |
+| `wg agent rm <id>` | Remove an agent |
+| `wg agent lineage <id>` | Show agent + role + motivation ancestry |
+| `wg agent performance <id>` | Show evaluation history for an agent |
+
+---
+
+### `wg evaluate`
+
+Trigger evaluation of a completed task.
+
+```bash
+wg evaluate <TASK> [--evaluator-model <MODEL>] [--dry-run]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--evaluator-model <MODEL>` | Model for the evaluator (overrides config) |
+| `--dry-run` | Show the evaluator prompt without executing |
+
+The task must be done, pending-review, or failed. Spawns an evaluator agent that scores the task across four dimensions:
+- **correctness** (40%) — output matches desired outcome
+- **completeness** (30%) — all aspects addressed
+- **efficiency** (15%) — no unnecessary steps
+- **style_adherence** (15%) — project conventions and constraints followed
+
+Scores propagate to the agent, role, and motivation performance records.
+
+---
+
+### `wg evolve`
+
+Trigger an evolution cycle to improve roles and motivations based on performance data.
+
+```bash
+wg evolve [--strategy <STRATEGY>] [--budget <N>] [--model <MODEL>] [--dry-run]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--strategy <name>` | Evolution strategy (default: `all`) |
+| `--budget <N>` | Maximum number of operations to apply |
+| `--model <MODEL>` | LLM model for the evolver agent |
+| `--dry-run` | Show the evolver prompt without executing |
+
+**Strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `mutation` | Modify a single existing role to improve weak dimensions |
+| `crossover` | Combine traits from two high-performing roles |
+| `gap-analysis` | Create entirely new roles/motivations for unmet needs |
+| `retirement` | Remove consistently poor-performing entities |
+| `motivation-tuning` | Adjust trade-offs on existing motivations |
+| `all` | Use all strategies as appropriate (default) |
 
 ---
 
 ## Agent Commands
 
-### `wg agent`
+### `wg agent run`
 
-Run autonomous agent loop (wake/check/work/sleep cycle).
+Run the autonomous agent loop (wake/check/work/sleep cycle).
 
 ```bash
-wg agent --actor <ACTOR> [OPTIONS]
+wg agent run --actor <ACTOR> [OPTIONS]
 ```
 
 **Options:**
@@ -727,8 +772,26 @@ wg agent --actor <ACTOR> [OPTIONS]
 | `--once` | Run only one iteration then exit |
 | `--interval <SECONDS>` | Sleep interval between iterations |
 | `--max-tasks <N>` | Stop after completing N tasks |
+| `--reset-state` | Reset agent state (discard saved statistics) |
 
-See [Agent Guide](./AGENT-GUIDE.md) for detailed usage.
+---
+
+### `wg spawn`
+
+Spawn an agent to work on a specific task.
+
+```bash
+wg spawn <TASK> --executor <NAME> [--model <MODEL>] [--timeout <DURATION>]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--executor <NAME>` | Executor to use: claude, shell, or custom config name (required) |
+| `--model <MODEL>` | Model override (haiku, sonnet, opus) |
+| `--timeout <DURATION>` | Timeout (e.g., 30m, 1h, 90s) |
+
+Model selection priority: CLI `--model` > task's `.model` > `coordinator.model` > `agent.model`.
 
 ---
 
@@ -740,8 +803,6 @@ Find the best next task for an actor.
 wg next --actor <ACTOR>
 ```
 
-Considers skills, trust level, and task availability to recommend work.
-
 ---
 
 ### `wg exec`
@@ -749,27 +810,9 @@ Considers skills, trust level, and task availability to recommend work.
 Execute a task's shell command (claim + run + done/fail).
 
 ```bash
-wg exec <TASK> [OPTIONS]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--actor <ACTOR>` | Actor performing execution |
-| `--dry-run` | Show command without running |
-| `--set <CMD>` | Set the exec command for a task |
-| `--clear` | Clear the exec command |
-
-**Examples:**
-```bash
-# Set a command for a task
-wg exec run-tests --set "cargo test"
-
-# Execute the task
-wg exec run-tests --actor ci-bot
-
-# Preview without running
-wg exec run-tests --dry-run
+wg exec <TASK> [--actor <ACTOR>] [--dry-run]
+wg exec <TASK> --set <CMD>     # set the exec command
+wg exec <TASK> --clear         # clear the exec command
 ```
 
 ---
@@ -782,8 +825,6 @@ Show context-efficient task trajectory (optimal claim order).
 wg trajectory <TASK> [--actor <ACTOR>]
 ```
 
-Computes task ordering that minimizes context switching for AI agents.
-
 ---
 
 ### `wg heartbeat`
@@ -791,18 +832,142 @@ Computes task ordering that minimizes context switching for AI agents.
 Record agent heartbeat or check for stale agents.
 
 ```bash
-# Record heartbeat
-wg heartbeat <ACTOR>
+wg heartbeat <ACTOR>                           # record heartbeat
+wg heartbeat --check [--threshold <MINUTES>]   # check for stale actors
+wg heartbeat --check --agents                  # check for stale agents
+```
 
-# Check for stale agents
-wg heartbeat --check [--threshold <MINUTES>]
+---
+
+### `wg agents`
+
+List running agents (from the service registry).
+
+```bash
+wg agents [--alive] [--dead] [--working] [--idle]
+```
+
+---
+
+### `wg kill`
+
+Terminate running agent(s).
+
+```bash
+wg kill <AGENT-ID> [--force]   # kill single agent
+wg kill --all [--force]         # kill all agents
+```
+
+---
+
+### `wg dead-agents`
+
+Detect and clean up dead agents.
+
+```bash
+wg dead-agents --check [--threshold <MINUTES>]  # check without modifying
+wg dead-agents --cleanup [--threshold <MINUTES>] # mark dead and unclaim tasks
+wg dead-agents --remove                          # remove dead agents from registry
+wg dead-agents --processes                       # check if agent processes are still running
+```
+
+---
+
+## Service Commands
+
+### `wg service start`
+
+Start the agent service daemon.
+
+```bash
+wg service start [OPTIONS]
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--check` | Check for stale actors |
-| `--threshold <N>` | Minutes without heartbeat before stale (default: 5) |
+| `--port <PORT>` | Port for HTTP API (optional) |
+| `--socket <PATH>` | Unix socket path (default: /tmp/wg-{project}.sock) |
+| `--max-agents <N>` | Max parallel agents (overrides config) |
+| `--executor <NAME>` | Executor for spawned agents (overrides config) |
+| `--interval <SECS>` | Background poll interval in seconds (overrides config) |
+| `--model <MODEL>` | Model for spawned agents (overrides config) |
+
+---
+
+### `wg service stop`
+
+Stop the agent service daemon.
+
+```bash
+wg service stop [--force] [--kill-agents]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--force` | SIGKILL the daemon immediately |
+| `--kill-agents` | Also kill running agents (by default they continue) |
+
+---
+
+### `wg service status`
+
+Show daemon PID, uptime, agent summary, and coordinator state.
+
+```bash
+wg service status
+```
+
+---
+
+### `wg service reload`
+
+Re-read config.toml without restarting (or apply specific overrides).
+
+```bash
+wg service reload [--max-agents <N>] [--executor <NAME>] [--interval <SECS>] [--model <MODEL>]
+```
+
+---
+
+### `wg service pause`
+
+Pause the coordinator. Running agents continue, but no new agents are spawned.
+
+```bash
+wg service pause
+```
+
+---
+
+### `wg service resume`
+
+Resume the coordinator. Triggers an immediate tick.
+
+```bash
+wg service resume
+```
+
+---
+
+### `wg service tick`
+
+Run a single coordinator tick and exit (debug mode).
+
+```bash
+wg service tick [--max-agents <N>] [--executor <NAME>] [--model <MODEL>]
+```
+
+---
+
+### `wg service install`
+
+Generate a systemd user service file for the wg service daemon.
+
+```bash
+wg service install
+```
 
 ---
 
@@ -828,8 +993,6 @@ Check the graph for issues (cycles, orphan references).
 wg check
 ```
 
-Validates graph integrity and reports problems.
-
 ---
 
 ### `wg graph`
@@ -837,7 +1000,7 @@ Validates graph integrity and reports problems.
 Output the full graph data.
 
 ```bash
-wg graph
+wg graph [--archive] [--since <DATE>] [--until <DATE>]
 ```
 
 ---
@@ -856,23 +1019,8 @@ wg viz [OPTIONS]
 | `--all` | Include done tasks |
 | `--status <STATUS>` | Filter by status |
 | `--critical-path` | Highlight critical path in red |
-| `--format <FMT>` | Output format: dot, mermaid (default: dot) |
+| `--format <FMT>` | Output format: dot, mermaid, ascii (default: dot) |
 | `-o, --output <FILE>` | Render directly to file (requires graphviz) |
-
-**Examples:**
-```bash
-# DOT format to stdout
-wg viz
-
-# Mermaid format
-wg viz --format mermaid
-
-# Render PNG
-wg viz -o graph.png
-
-# With critical path highlighted
-wg viz --critical-path -o critical.png
-```
 
 ---
 
@@ -881,26 +1029,7 @@ wg viz --critical-path -o critical.png
 Archive completed tasks to a separate file.
 
 ```bash
-wg archive [OPTIONS]
-```
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--dry-run` | Show what would be archived |
-| `--older <DURATION>` | Only archive tasks older than (e.g., 7d, 30d) |
-| `--list` | List archived tasks |
-
-**Examples:**
-```bash
-# Archive all done tasks
-wg archive
-
-# Archive tasks completed more than 30 days ago
-wg archive --older 30d
-
-# Preview
-wg archive --dry-run
+wg archive [--dry-run] [--older <DURATION>] [--list]
 ```
 
 ---
@@ -910,15 +1039,14 @@ wg archive --dry-run
 Reschedule a task (set `not_before` timestamp).
 
 ```bash
-wg reschedule <ID> <TIMESTAMP>
+wg reschedule <ID> [--after <HOURS>] [--at <TIMESTAMP>]
 ```
 
-Task will not appear in `wg ready` until the timestamp passes.
-
-**Example:**
-```bash
-wg reschedule deploy-prod "2026-02-01T09:00:00Z"
-```
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--after <HOURS>` | Hours from now until task is ready |
+| `--at <TIMESTAMP>` | Specific ISO 8601 timestamp |
 
 ---
 
@@ -927,15 +1055,10 @@ wg reschedule deploy-prod "2026-02-01T09:00:00Z"
 Manage task artifacts (produced outputs).
 
 ```bash
-# Add artifact
-wg artifact <TASK> <PATH>
-
-# List artifacts
-wg artifact <TASK>
-
-# Remove artifact
-wg artifact <TASK> <PATH> --remove
+wg artifact <TASK> [<PATH>] [--remove]
 ```
+
+Without a path, lists artifacts. With a path, adds it (or removes with `--remove`).
 
 ---
 
@@ -947,23 +1070,67 @@ View or modify project configuration.
 wg config [OPTIONS]
 ```
 
+With no options (or `--show`), displays current configuration.
+
 **Options:**
 | Option | Description |
 |--------|-------------|
 | `--show` | Display current configuration |
 | `--init` | Create default config file |
-| `--executor <NAME>` | Set executor (claude, opencode, codex) |
-| `--model <MODEL>` | Set model |
+| `--executor <NAME>` | Set agent executor (claude, opencode, codex, shell) |
+| `--model <MODEL>` | Set agent model |
 | `--set-interval <SECS>` | Set agent sleep interval |
+| `--max-agents <N>` | Set coordinator max agents |
+| `--coordinator-interval <SECS>` | Set coordinator tick interval |
+| `--poll-interval <SECS>` | Set service daemon background poll interval |
+| `--coordinator-executor <NAME>` | Set coordinator executor |
+| `--auto-evaluate <BOOL>` | Enable/disable automatic evaluation |
+| `--auto-assign <BOOL>` | Enable/disable automatic identity assignment |
+| `--assigner-model <MODEL>` | Set model for assigner agents |
+| `--evaluator-model <MODEL>` | Set model for evaluator agents |
+| `--evolver-model <MODEL>` | Set model for evolver agents |
+| `--assigner-agent <HASH>` | Set assigner agent (content-hash) |
+| `--evaluator-agent <HASH>` | Set evaluator agent (content-hash) |
+| `--evolver-agent <HASH>` | Set evolver agent (content-hash) |
+| `--retention-heuristics <TEXT>` | Set retention heuristics (prose policy for evolver) |
 
 **Examples:**
+
 ```bash
 # View config
-wg config --show
+wg config
 
-# Set executor
-wg config --executor claude --model opus-4-5
+# Set executor and model
+wg config --executor claude --model opus
+
+# Enable the full agency automation loop
+wg config --auto-evaluate true --auto-assign true
+
+# Set per-role model overrides
+wg config --assigner-model haiku --evaluator-model opus --evolver-model opus
 ```
+
+---
+
+### `wg quickstart`
+
+Print a concise cheat sheet for agent onboarding.
+
+```bash
+wg quickstart
+```
+
+---
+
+### `wg tui`
+
+Launch the interactive terminal dashboard.
+
+```bash
+wg tui [--refresh-rate <MS>]
+```
+
+Default refresh rate: 2000ms.
 
 ---
 
@@ -975,14 +1142,7 @@ All commands support these options:
 |--------|-------------|
 | `--dir <PATH>` | Workgraph directory (default: .workgraph) |
 | `--json` | Output as JSON |
-| `-h, --help` | Show help |
+| `-h, --help` | Show help (use `--help-all` for full command list) |
+| `--help-all` | Show all commands in help output |
+| `-a, --alphabetical` | Sort help output alphabetically |
 | `-V, --version` | Show version |
-
-**Example:**
-```bash
-# Use alternate directory
-wg --dir /path/to/project/.workgraph list
-
-# JSON output for scripting
-wg list --json | jq '.[] | select(.status == "open")'
-```
