@@ -54,6 +54,16 @@ pub fn show(dir: &Path, json: bool) -> Result<()> {
         if let Some(ref heuristics) = config.agency.retention_heuristics {
             println!("  retention_heuristics = \"{}\"", heuristics);
         }
+        println!("  auto_triage = {}", config.agency.auto_triage);
+        if let Some(ref model) = config.agency.triage_model {
+            println!("  triage_model = \"{}\"", model);
+        }
+        if let Some(timeout) = config.agency.triage_timeout {
+            println!("  triage_timeout = {}", timeout);
+        }
+        if let Some(max_bytes) = config.agency.triage_max_log_bytes {
+            println!("  triage_max_log_bytes = {}", max_bytes);
+        }
         println!();
         if config.project.name.is_some() || config.project.description.is_some() {
             println!("[project]");
@@ -98,6 +108,10 @@ pub fn update(
     evaluator_agent: Option<&str>,
     evolver_agent: Option<&str>,
     retention_heuristics: Option<&str>,
+    auto_triage: Option<bool>,
+    triage_model: Option<&str>,
+    triage_timeout: Option<u64>,
+    triage_max_log_bytes: Option<usize>,
 ) -> Result<()> {
     let mut config = Config::load(dir)?;
     let mut changed = false;
@@ -198,6 +212,30 @@ pub fn update(
     if let Some(v) = retention_heuristics {
         config.agency.retention_heuristics = Some(v.to_string());
         println!("Set agency.retention_heuristics = \"{}\"", v);
+        changed = true;
+    }
+
+    if let Some(v) = auto_triage {
+        config.agency.auto_triage = v;
+        println!("Set agency.auto_triage = {}", v);
+        changed = true;
+    }
+
+    if let Some(m) = triage_model {
+        config.agency.triage_model = Some(m.to_string());
+        println!("Set agency.triage_model = \"{}\"", m);
+        changed = true;
+    }
+
+    if let Some(t) = triage_timeout {
+        config.agency.triage_timeout = Some(t);
+        println!("Set agency.triage_timeout = {}", t);
+        changed = true;
+    }
+
+    if let Some(b) = triage_max_log_bytes {
+        config.agency.triage_max_log_bytes = Some(b);
+        println!("Set agency.triage_max_log_bytes = {}", b);
         changed = true;
     }
 
@@ -385,6 +423,7 @@ mod tests {
             temp_dir.path(), Some("opencode"), Some("gpt-4"), Some(30),
             None, None, None, None,
             None, None, None, None, None, None, None, None, None,
+            None, None, None, None,
         );
         assert!(result.is_ok());
 
@@ -402,6 +441,7 @@ mod tests {
         let result = update(
             temp_dir.path(), None, None, None, Some(8), Some(60), None, Some("shell"),
             None, None, None, None, None, None, None, None, None,
+            None, None, None, None,
         );
         assert!(result.is_ok());
 
@@ -419,6 +459,7 @@ mod tests {
         let result = update(
             temp_dir.path(), None, None, None, None, None, Some(120), None,
             None, None, None, None, None, None, None, None, None,
+            None, None, None, None,
         );
         assert!(result.is_ok());
 
@@ -437,6 +478,7 @@ mod tests {
             Some("sonnet"), Some("haiku"), Some("opus-4-5"),
             Some("assigner-hash"), Some("evaluator-hash"),
             Some("evolver-hash"), Some("Retire below 0.3 after 10 evals"),
+            None, None, None, None,
         );
         assert!(result.is_ok());
 

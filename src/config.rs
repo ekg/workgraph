@@ -96,6 +96,22 @@ pub struct AgencyConfig {
     /// (e.g. when to retire underperforming roles/motivations)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_heuristics: Option<String>,
+
+    /// Automatically triage dead agents to assess work progress before respawning
+    #[serde(default)]
+    pub auto_triage: bool,
+
+    /// Model to use for triage (default: "haiku")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_model: Option<String>,
+
+    /// Timeout in seconds for triage calls (default: 30)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_timeout: Option<u64>,
+
+    /// Maximum bytes to read from agent output log for triage (default: 50000)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_max_log_bytes: Option<usize>,
 }
 
 impl Default for AgencyConfig {
@@ -110,6 +126,10 @@ impl Default for AgencyConfig {
             evolver_model: None,
             evolver_agent: None,
             retention_heuristics: None,
+            auto_triage: false,
+            triage_model: None,
+            triage_timeout: None,
+            triage_max_log_bytes: None,
         }
     }
 }

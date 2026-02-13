@@ -725,6 +725,22 @@ enum Commands {
         /// Set retention heuristics (prose policy for evolver)
         #[arg(long)]
         retention_heuristics: Option<String>,
+
+        /// Enable/disable automatic triage of dead agents
+        #[arg(long)]
+        auto_triage: Option<bool>,
+
+        /// Set model for triage (default: haiku)
+        #[arg(long)]
+        triage_model: Option<String>,
+
+        /// Set timeout in seconds for triage calls (default: 30)
+        #[arg(long)]
+        triage_timeout: Option<u64>,
+
+        /// Set max bytes to read from agent output log for triage (default: 50000)
+        #[arg(long)]
+        triage_max_log_bytes: Option<usize>,
     },
 
     /// Detect and clean up dead agents
@@ -1829,6 +1845,10 @@ fn main() -> Result<()> {
             evaluator_agent,
             evolver_agent,
             retention_heuristics,
+            auto_triage,
+            triage_model,
+            triage_timeout,
+            triage_max_log_bytes,
         } => {
             // Handle Matrix configuration
             if matrix
@@ -1863,7 +1883,9 @@ fn main() -> Result<()> {
                 && auto_evaluate.is_none() && auto_assign.is_none()
                 && assigner_model.is_none() && evaluator_model.is_none() && evolver_model.is_none()
                 && assigner_agent.is_none() && evaluator_agent.is_none()
-                && evolver_agent.is_none() && retention_heuristics.is_none()) {
+                && evolver_agent.is_none() && retention_heuristics.is_none()
+                && auto_triage.is_none() && triage_model.is_none()
+                && triage_timeout.is_none() && triage_max_log_bytes.is_none()) {
                 commands::config_cmd::show(&workgraph_dir, cli.json)
             } else {
                 commands::config_cmd::update(
@@ -1884,6 +1906,10 @@ fn main() -> Result<()> {
                     evaluator_agent.as_deref(),
                     evolver_agent.as_deref(),
                     retention_heuristics.as_deref(),
+                    auto_triage,
+                    triage_model.as_deref(),
+                    triage_timeout,
+                    triage_max_log_bytes,
                 )
             }
         }
