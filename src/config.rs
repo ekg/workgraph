@@ -392,7 +392,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.agent.executor, "claude");
-        assert_eq!(config.agent.model, "opus-4-5");
+        assert_eq!(config.agent.model, "opus");
         assert_eq!(config.agent.interval, 10);
     }
 
@@ -434,7 +434,7 @@ mod tests {
     fn test_build_command() {
         let config = Config::default();
         let cmd = config.build_command("do something", "task-1", "/home/user/project");
-        assert!(cmd.contains("opus-4-5"));
+        assert!(cmd.contains("opus"));
         assert!(cmd.contains("do something"));
     }
 
