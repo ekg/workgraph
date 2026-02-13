@@ -247,6 +247,9 @@ pub fn run(
 TASK_ID="{task_id}"
 OUTPUT_FILE="{output_file}"
 
+# Allow nested Claude Code sessions (spawned agents are independent)
+unset CLAUDECODE
+
 # Run the agent command
 {inner_command} >> "$OUTPUT_FILE" 2>&1
 EXIT_CODE=$?
@@ -530,6 +533,9 @@ pub fn spawn_agent(
         r#"#!/bin/bash
 TASK_ID="{task_id}"
 OUTPUT_FILE="{output_file}"
+
+# Allow nested Claude Code sessions (spawned agents are independent)
+unset CLAUDECODE
 
 # Run the agent command
 {inner_command} >> "$OUTPUT_FILE" 2>&1
