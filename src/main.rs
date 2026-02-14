@@ -196,40 +196,6 @@ enum Commands {
         id: String,
     },
 
-    /// [DEPRECATED] Behaves like 'wg done'. Use 'wg done' instead.
-    Submit {
-        /// Task ID to submit
-        id: String,
-
-        /// Actor submitting the work (ignored)
-        #[arg(long)]
-        actor: Option<String>,
-    },
-
-    /// [DEPRECATED] Behaves like 'wg done'. Use 'wg done' instead.
-    Approve {
-        /// Task ID to approve
-        id: String,
-
-        /// Actor approving the work (ignored)
-        #[arg(long)]
-        actor: Option<String>,
-    },
-
-    /// [DEPRECATED] Send a done task back to open for rework.
-    Reject {
-        /// Task ID to reject
-        id: String,
-
-        /// Reason for rejection
-        #[arg(long)]
-        reason: Option<String>,
-
-        /// Actor rejecting the work
-        #[arg(long)]
-        actor: Option<String>,
-    },
-
     /// Mark a task as failed (can be retried)
     Fail {
         /// Task ID to mark as failed
@@ -1313,7 +1279,7 @@ fn print_help(dir: &PathBuf, show_all: bool, alphabetical: bool) {
                 sorted.len() - MAX_HELP_COMMANDS
             );
         }
-    } else if config.help.ordering == "curated" || usage::load_command_order(dir).is_none() {
+    } else if config.help.ordering == "curated" {
         // Use curated default ordering
         let mut shown = std::collections::HashSet::new();
         let to_show = if show_all {
@@ -1358,9 +1324,8 @@ fn print_help(dir: &PathBuf, show_all: bool, alphabetical: bool) {
                 subcommands.len() - MAX_HELP_COMMANDS
             );
         }
-    } else {
+    } else if let Some(usage_data) = usage::load_command_order(dir) {
         // Use personalized usage-based ordering with tiers
-        let usage_data = usage::load_command_order(dir).unwrap();
         let (frequent, occasional, rare) = usage::group_by_tier(&usage_data);
 
         let mut shown = 0;
@@ -1424,6 +1389,49 @@ fn print_help(dir: &PathBuf, show_all: bool, alphabetical: bool) {
                 println!("  ... and {} more (--help-all)", unshown);
             }
         }
+    } else {
+        // No usage data and not curated — fall back to curated ordering
+        let mut shown = std::collections::HashSet::new();
+        let to_show = if show_all {
+            subcommands.len()
+        } else {
+            MAX_HELP_COMMANDS.min(subcommands.len())
+        };
+
+        println!("Commands:");
+        let mut count = 0;
+
+        for &default_cmd in usage::DEFAULT_ORDER {
+            if count >= to_show {
+                break;
+            }
+            if let Some((name, about)) = subcommands.iter().find(|(n, _)| n == default_cmd) {
+                println!("  {:15} {}", name, about);
+                shown.insert(name.clone());
+                count += 1;
+            }
+        }
+
+        let mut remaining: Vec<_> = subcommands
+            .iter()
+            .filter(|(n, _)| !shown.contains(n))
+            .collect();
+        remaining.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (name, about) in remaining {
+            if count >= to_show {
+                break;
+            }
+            println!("  {:15} {}", name, about);
+            count += 1;
+        }
+
+        if !show_all && subcommands.len() > MAX_HELP_COMMANDS {
+            println!(
+                "  ... and {} more (--help-all)",
+                subcommands.len() - MAX_HELP_COMMANDS
+            );
+        }
     }
 
     println!("\nOptions:");
@@ -1441,9 +1449,6 @@ fn command_name(cmd: &Commands) -> &'static str {
         Commands::Add { .. } => "add",
         Commands::Edit { .. } => "edit",
         Commands::Done { .. } => "done",
-        Commands::Submit { .. } => "submit",
-        Commands::Approve { .. } => "approve",
-        Commands::Reject { .. } => "reject",
         Commands::Fail { .. } => "fail",
         Commands::Abandon { .. } => "abandon",
         Commands::Retry { .. } => "retry",
@@ -1602,15 +1607,6 @@ fn main() -> Result<()> {
             loop_iteration,
         ),
         Commands::Done { id } => commands::done::run(&workgraph_dir, &id),
-        Commands::Submit { id, actor } => {
-            commands::submit::run(&workgraph_dir, &id, actor.as_deref())
-        }
-        Commands::Approve { id, actor } => {
-            commands::approve::run(&workgraph_dir, &id, actor.as_deref())
-        }
-        Commands::Reject { id, reason, actor } => {
-            commands::reject::run(&workgraph_dir, &id, reason.as_deref(), actor.as_deref())
-        }
         Commands::Fail { id, reason } => {
             commands::fail::run(&workgraph_dir, &id, reason.as_deref())
         }

@@ -191,7 +191,6 @@ pub const DEFAULT_ORDER: &[&str] = &[
     // Tier 3: Working on tasks
     "artifact",
     "context",
-    "submit",
     // Tier 4: Setup & structure
     "init",
     "quickstart",
