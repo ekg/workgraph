@@ -1469,12 +1469,57 @@ fn command_name(cmd: &Commands) -> &'static str {
     }
 }
 
+/// Check if the user is requesting help for a specific subcommand (e.g., `wg show --help`).
+///
+/// Because we use `disable_help_flag = true` for the custom top-level help system,
+/// clap doesn't intercept `--help` at the subcommand level. This function pre-scans
+/// raw args and, if a subcommand + help flag is detected, prints clap's native help
+/// for that subcommand.
+fn maybe_print_subcommand_help() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check if --help or -h appears alongside a subcommand
+    let has_help = args.iter().any(|a| a == "--help" || a == "-h");
+    if !has_help {
+        return false;
+    }
+
+    // Build the clap command to get subcommand names
+    let cmd = Cli::command();
+    let subcmd_names: Vec<String> = cmd
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .collect();
+
+    // Find which subcommand is being referenced (skip argv[0], skip flags)
+    let subcmd = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-') && subcmd_names.contains(a));
+
+    if let Some(subcmd_name) = subcmd {
+        // Extract the subcommand from clap and print its help directly
+        let cmd = Cli::command();
+        if let Some(sub) = cmd.get_subcommands().find(|c| c.get_name() == subcmd_name) {
+            let mut sub = sub.clone().disable_help_flag(false);
+            sub.print_help().ok();
+            println!();
+            std::process::exit(0);
+        }
+    }
+
+    false
+}
+
 fn main() -> Result<()> {
+    // Handle subcommand-level help before clap parses (since we disable_help_flag globally)
+    maybe_print_subcommand_help();
+
     let cli = Cli::parse();
 
     let workgraph_dir = cli.dir.unwrap_or_else(|| PathBuf::from(".workgraph"));
 
-    // Handle help flags
+    // Handle help flags (top-level custom help with usage-based ordering)
     if cli.help || cli.help_all || cli.command.is_none() {
         print_help(&workgraph_dir, cli.help_all, cli.alphabetical);
         return Ok(());

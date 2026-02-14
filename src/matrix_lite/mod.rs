@@ -236,7 +236,13 @@ impl MatrixClient {
     fn save_sync_token(&self) {
         if let Some(token) = &self.sync_token {
             let path = self.state_dir().join("sync_token");
-            let _ = std::fs::write(path, token);
+            if let Err(e) = std::fs::write(&path, token) {
+                eprintln!(
+                    "Warning: failed to save sync token to {}: {}",
+                    path.display(),
+                    e
+                );
+            }
         }
     }
 

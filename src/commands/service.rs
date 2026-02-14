@@ -276,8 +276,19 @@ impl CoordinatorState {
 
     pub fn save(&self, dir: &Path) {
         let path = coordinator_state_path(dir);
-        if let Ok(content) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(&path, content);
+        match serde_json::to_string_pretty(self) {
+            Ok(content) => {
+                if let Err(e) = fs::write(&path, content) {
+                    eprintln!(
+                        "Warning: failed to save coordinator state to {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to serialize coordinator state: {}", e);
+            }
         }
     }
 
