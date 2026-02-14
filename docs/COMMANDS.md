@@ -157,41 +157,26 @@ Submit a verified task for review.
 wg submit <ID> [--actor <ACTOR>]
 ```
 
-Sets status to `pending-review`. Used for tasks created with `--verify` that require approval before completion.
-
-**Example:**
-```bash
-wg submit security-audit --actor claude
-```
+**DEPRECATED**: Behaves like `wg done`. Use `wg done` instead.
 
 ---
 
 ### `wg approve`
 
-Approve a pending-review task (marks as done).
+**DEPRECATED**: Behaves like `wg done`. Use `wg done` instead.
 
 ```bash
 wg approve <ID> [--actor <ACTOR>]
-```
-
-**Example:**
-```bash
-wg approve security-audit --actor erik
 ```
 
 ---
 
 ### `wg reject`
 
-Reject a pending-review task (returns to open for rework).
+**DEPRECATED**: Sends a done/in-progress task back to open for rework.
 
 ```bash
 wg reject <ID> [--reason <TEXT>] [--actor <ACTOR>]
-```
-
-**Example:**
-```bash
-wg reject security-audit --reason "Missing OWASP top 10 coverage" --actor erik
 ```
 
 ---
@@ -369,7 +354,7 @@ wg list [--status <STATUS>]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--status <STATUS>` | Filter by status (open, in-progress, done, failed, abandoned, pending-review) |
+| `--status <STATUS>` | Filter by status (open, in-progress, done, failed, abandoned) |
 
 ---
 
@@ -970,7 +955,7 @@ wg evaluate <TASK> [--evaluator-model <MODEL>] [--dry-run]
 | `--evaluator-model <MODEL>` | Model for the evaluator (overrides config) |
 | `--dry-run` | Show the evaluator prompt without executing |
 
-The task must be done, pending-review, or failed. Spawns an evaluator agent that scores the task across four dimensions:
+The task must be done or failed. Spawns an evaluator agent that scores the task across four dimensions:
 - **correctness** (40%) — output matches desired outcome
 - **completeness** (30%) — all aspects addressed
 - **efficiency** (15%) — no unnecessary steps

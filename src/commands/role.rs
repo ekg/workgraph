@@ -198,7 +198,7 @@ pub fn run_lineage(dir: &Path, id: &str, json: bool) -> Result<()> {
     let roles_dir = agency_dir.join("roles");
 
     if !roles_dir.exists() {
-        anyhow::bail!("No agency/roles directory found. Run 'wg init' first.");
+        anyhow::bail!("No agency/roles directory found. Run 'wg agency init' first.");
     }
 
     // Resolve prefix to full ID first

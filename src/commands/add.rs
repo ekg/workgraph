@@ -24,7 +24,7 @@ pub fn parse_guard_expr(expr: &str) -> Result<workgraph::graph::LoopGuard> {
                 "blocked" => Status::Blocked,
                 "failed" => Status::Failed,
                 "abandoned" => Status::Abandoned,
-                "pending-review" => Status::PendingReview,
+                "pending-review" => Status::Done, // pending-review is deprecated, maps to done
                 _ => anyhow::bail!("Unknown status '{}' in guard expression", status_str),
             };
             return Ok(workgraph::graph::LoopGuard::TaskStatus {
@@ -354,13 +354,13 @@ mod tests {
     }
 
     #[test]
-    fn guard_task_status_pending_review() {
+    fn guard_task_status_pending_review_maps_to_done() {
         let g = parse_guard_expr("task:pr-check=pending-review").unwrap();
         assert_eq!(
             g,
             LoopGuard::TaskStatus {
                 task: "pr-check".to_string(),
-                status: Status::PendingReview,
+                status: Status::Done,
             }
         );
     }

@@ -94,8 +94,6 @@ wg done <task-id>        # Mark complete
 
 ```
 open → [claim] → in-progress → [done] → done
-                             → [submit] → pending-review → [approve] → done
-                                                         → [reject] → open
                              → [fail] → failed → [retry] → open
                              → [abandon] → abandoned
 ```

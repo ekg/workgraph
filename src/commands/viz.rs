@@ -80,7 +80,6 @@ pub fn run(dir: &Path, options: VizOptions) -> Result<()> {
                     Status::Blocked => "blocked",
                     Status::Failed => "failed",
                     Status::Abandoned => "abandoned",
-                    Status::PendingReview => "pending-review",
                 };
                 return task_status == status_filter.to_lowercase();
             }
@@ -144,7 +143,6 @@ fn generate_dot(
             Status::Open => "style=filled, fillcolor=white",
             Status::Failed => "style=filled, fillcolor=salmon",
             Status::Abandoned => "style=filled, fillcolor=lightgray",
-            Status::PendingReview => "style=filled, fillcolor=lightskyblue",
         };
 
         // Build label with hours estimate if available
@@ -297,7 +295,6 @@ fn generate_mermaid(
             Status::Open => format!("  {}[\"{}\"]", task.id, label),
             Status::Failed => format!("  {}{{{{\"{}\"}}}}!", task.id, label),
             Status::Abandoned => format!("  {}[\"{}\"]:::abandoned", task.id, label),
-            Status::PendingReview => format!("  {}([\"{}\"]) ", task.id, label), // Stadium shape
         };
         lines.push(node);
     }
@@ -577,13 +574,12 @@ fn generate_ascii(
             return "";
         }
         match status {
-            Status::Done => "\x1b[32m",          // green
-            Status::InProgress => "\x1b[33m",    // yellow
-            Status::Open => "\x1b[37m",          // white
-            Status::Blocked => "\x1b[90m",       // gray
-            Status::Failed => "\x1b[31m",        // red
-            Status::Abandoned => "\x1b[90m",     // gray
-            Status::PendingReview => "\x1b[36m", // cyan
+            Status::Done => "\x1b[32m",       // green
+            Status::InProgress => "\x1b[33m", // yellow
+            Status::Open => "\x1b[37m",       // white
+            Status::Blocked => "\x1b[90m",    // gray
+            Status::Failed => "\x1b[31m",     // red
+            Status::Abandoned => "\x1b[90m",  // gray
         }
     };
     let reset = if use_color { "\x1b[0m" } else { "" };
@@ -596,7 +592,6 @@ fn generate_ascii(
             Status::Blocked => "blocked",
             Status::Failed => "failed",
             Status::Abandoned => "abandoned",
-            Status::PendingReview => "pending-review",
         }
     };
 

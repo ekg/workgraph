@@ -537,16 +537,16 @@ mod tests {
     }
 
     #[test]
-    fn test_coordination_status_pending_review_not_ready() {
+    fn test_coordination_status_done_not_ready() {
         let mut graph = WorkGraph::new();
 
-        let mut t1 = make_task("t1", "Pending review");
-        t1.status = Status::PendingReview;
+        let mut t1 = make_task("t1", "Done task");
+        t1.status = Status::Done;
         graph.add_node(Node::Task(t1));
 
         let status = get_coordination_status(&graph);
 
-        // PendingReview is not "ready" (not Open status)
+        // Done is not "ready" (not Open status)
         assert!(status.ready.is_empty());
     }
 

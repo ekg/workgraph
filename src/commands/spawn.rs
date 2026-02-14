@@ -131,8 +131,9 @@ fn spawn_agent_inner(
         .get_task(task_id)
         .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", task_id))?;
 
-    // Check if task is already claimed
+    // Only allow spawning on tasks that are Open or Blocked
     match task.status {
+        Status::Open | Status::Blocked => {}
         Status::InProgress => {
             let since = task
                 .started_at
@@ -156,7 +157,15 @@ fn spawn_agent_inner(
         Status::Done => {
             anyhow::bail!("Task '{}' is already done", task_id);
         }
-        _ => {}
+        Status::Failed => {
+            anyhow::bail!(
+                "Cannot spawn on task '{}': task is Failed. Use 'wg retry' first.",
+                task_id
+            );
+        }
+        Status::Abandoned => {
+            anyhow::bail!("Cannot spawn on task '{}': task is Abandoned", task_id);
+        }
     }
 
     // Build context from dependencies
@@ -169,9 +178,6 @@ fn spawn_agent_inner(
     let task_exec = task.exec.clone();
     // Get task model preference
     let task_model = task.model.clone();
-    // Check if task requires verification
-    let task_verified = task.verify.is_some();
-
     // Load executor config using the registry
     let executor_registry = ExecutorRegistry::new(dir);
     let executor_config = executor_registry.load_config(executor_name)?;
@@ -246,16 +252,8 @@ fn spawn_agent_inner(
 
     // Create a wrapper script that runs the command and handles completion
     // This ensures tasks get marked done/failed even if the agent doesn't do it
-    let complete_cmd = if task_verified {
-        "wg submit \"$TASK_ID\" 2>> \"$OUTPUT_FILE\" || true".to_string()
-    } else {
-        "wg done \"$TASK_ID\" 2>> \"$OUTPUT_FILE\" || true".to_string()
-    };
-    let complete_msg = if task_verified {
-        "[wrapper] Agent exited successfully, submitting for review"
-    } else {
-        "[wrapper] Agent exited successfully, marking task done"
-    };
+    let complete_cmd = "wg done \"$TASK_ID\" 2>> \"$OUTPUT_FILE\" || true".to_string();
+    let complete_msg = "[wrapper] Agent exited successfully, marking task done";
 
     let wrapper_script = format!(
         r#"#!/bin/bash
@@ -269,7 +267,7 @@ unset CLAUDECODE
 {inner_command} >> "$OUTPUT_FILE" 2>&1
 EXIT_CODE=$?
 
-# Check if task is still in progress (agent didn't mark it done/failed/submitted)
+# Check if task is still in progress (agent didn't mark it done/failed)
 TASK_STATUS=$(wg show "$TASK_ID" --json 2>/dev/null | grep -o '"status": *"[^"]*"' | head -1 | sed 's/.*"status": *"//;s/"//' || echo "unknown")
 
 if [ "$TASK_STATUS" = "in-progress" ]; then
@@ -678,7 +676,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut task = make_task("t1", "Test Task");
         task.exec = Some("echo hello".to_string());
-        task.verify = Some("manual".to_string()); // Verified, should use wg submit
+        task.verify = Some("manual".to_string());
         setup_graph(temp_dir.path(), vec![task]);
 
         run(temp_dir.path(), "t1", "shell", None, None, false).unwrap();
@@ -691,10 +689,10 @@ mod tests {
             wrapper_path
         );
 
-        // Read wrapper script and verify it uses submit for verified tasks
+        // Verified tasks now also use wg done (submit is deprecated)
         let script = fs::read_to_string(&wrapper_path).unwrap();
-        assert!(script.contains("wg submit \"$TASK_ID\""));
-        assert!(script.contains("[wrapper] Agent exited successfully, submitting for review"));
+        assert!(script.contains("wg done \"$TASK_ID\""));
+        assert!(script.contains("[wrapper] Agent exited successfully, marking task done"));
     }
 
     #[test]

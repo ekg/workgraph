@@ -80,7 +80,6 @@ fn status_color(status: &Status, is_archived: bool) -> &'static str {
         Status::Open => "white",       // Ready to pick up
         Status::Failed => "salmon",    // Red-ish - needs attention
         Status::Abandoned => "lightgray", // Grayed out
-        Status::PendingReview => "lightskyblue", // Blue - awaiting review
     }
 }
 
@@ -279,7 +278,6 @@ mod tests {
         assert_eq!(status_color(&Status::Blocked, false), "khaki");
         assert_eq!(status_color(&Status::Failed, false), "salmon");
         assert_eq!(status_color(&Status::Abandoned, false), "lightgray");
-        assert_eq!(status_color(&Status::PendingReview, false), "lightskyblue");
     }
 
     #[test]

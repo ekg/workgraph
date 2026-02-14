@@ -207,7 +207,7 @@ When `auto_triage` is enabled, dead agents are triaged using an LLM to assess ho
 
 | Verdict | Behavior |
 |---------|----------|
-| `done` | Task is marked complete (or pending-review if it has verification criteria) |
+| `done` | Task is marked complete |
 | `continue` | Task is unclaimed and reopened with a recovery context appended to the description, so the next agent can pick up where the previous one left off |
 | `restart` | Task is unclaimed and reopened for a fresh attempt |
 

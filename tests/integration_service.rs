@@ -295,7 +295,7 @@ fn test_auto_pickup_via_graph_changed() {
     // NOT the 300s poll interval.
     let picked_up = wait_for(Duration::from_secs(10), 200, || {
         let status = task_status(&wg_dir, "test-task-1");
-        status == "in-progress" || status == "done" || status == "pending-review"
+        status == "in-progress" || status == "done"
     });
 
     assert!(
@@ -316,7 +316,7 @@ fn test_auto_pickup_via_graph_changed() {
     // wrapper died and re-spawn the agent.
     let completed = wait_for(Duration::from_secs(15), 500, || {
         let st = task_status(&wg_dir, "test-task-1");
-        if st == "done" || st == "pending-review" {
+        if st == "done" {
             return true;
         }
         // Nudge the coordinator to detect dead agents and re-spawn
@@ -405,7 +405,7 @@ fn test_fallback_poll_pickup() {
     // With a 2s poll, it should be picked up within ~5s.
     let picked_up = wait_for(Duration::from_secs(10), 300, || {
         let status = task_status(&wg_dir, "poll-task");
-        status == "in-progress" || status == "done" || status == "pending-review"
+        status == "in-progress" || status == "done"
     });
 
     assert!(
@@ -424,7 +424,7 @@ fn test_fallback_poll_pickup() {
     // Wait for completion (periodically nudge coordinator to handle dead agents)
     let completed = wait_for(Duration::from_secs(10), 500, || {
         let st = task_status(&wg_dir, "poll-task");
-        if st == "done" || st == "pending-review" {
+        if st == "done" {
             return true;
         }
         notify_graph_changed(&wg_dir);

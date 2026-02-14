@@ -99,7 +99,7 @@ evolver_model = "opus"
 4. A wrapper script is generated in `.workgraph/agents/agent-N/run.sh` that:
    - Runs the executor (claude, shell, etc.)
    - Captures output to `output.log`
-   - On exit: marks the task as done, submitted (if verified), or failed
+   - On exit: marks the task as done or failed
 5. The process is detached with `setsid()` so it survives daemon restarts
 6. The agent is registered in the agent registry
 
@@ -186,9 +186,7 @@ For AI assistants (like Claude Code) working interactively on a claimed task:
 7. **Mark complete or failed**
    ```bash
    wg done <task-id>
-   # or for verified tasks:
-   wg submit <task-id>
-   # or if blocked:
+   # or if something went wrong:
    wg fail <task-id> --reason "Missing dependency"
    ```
 

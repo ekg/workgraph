@@ -37,7 +37,7 @@ MANUAL MODE (no service running)
   wg ready                    # See tasks available to work on
   wg claim <task-id>          # Claim a task (sets status to in-progress)
   wg log <task-id> "message"  # Log progress as you work
-  wg done <task-id>           # Mark task complete (use 'wg submit' if verified)
+  wg done <task-id>           # Mark task complete
 
 DISCOVERING & ADDING WORK
 ─────────────────────────────────────────
@@ -49,8 +49,7 @@ DISCOVERING & ADDING WORK
 
 TASK STATE COMMANDS
 ─────────────────────────────────────────
-  wg done <task-id>           # Complete (non-verified tasks)
-  wg submit <task-id>         # Submit for review (verified tasks)
+  wg done <task-id>           # Mark task complete
   wg fail <task-id> --reason  # Mark failed (can be retried)
   wg abandon <task-id>        # Give up permanently
 
@@ -77,7 +76,6 @@ TIPS
 • If no coordinator: ready → claim → work → done
 • Run 'wg log' BEFORE starting work to track progress
 • Use 'wg context' to understand what dependencies produced
-• If 'wg done' fails, the task may require verification — use 'wg submit'
 • Check 'wg blocked <task-id>' if a task isn't appearing in ready list
 "#;
 
@@ -111,8 +109,7 @@ pub fn run(json: bool) -> Result<()> {
                     "artifact": "Record output file/artifact"
                 },
                 "completion": {
-                    "done": "Mark task complete (non-verified)",
-                    "submit": "Submit for review (verified tasks)",
+                    "done": "Mark task complete",
                     "fail": "Mark failed (can be retried)",
                     "abandon": "Give up permanently"
                 }
@@ -128,7 +125,6 @@ pub fn run(json: bool) -> Result<()> {
                 "If no coordinator: ready → claim → work → done",
                 "Run 'wg log' BEFORE starting work to track progress",
                 "Use 'wg context' to understand what dependencies produced",
-                "If 'wg done' fails, the task may require verification - use 'wg submit'",
                 "Check 'wg blocked <task-id>' if a task isn't appearing in ready list"
             ]
         });
@@ -214,7 +210,7 @@ mod tests {
             "commands": {
                 "discovery": { "list": "List all tasks", "show": "View task details and context", "add": "Add a new task", "ready": "See tasks available to work on (manual mode)" },
                 "work": { "claim": "Claim a task for work (manual mode only)", "log": "Log progress as you work", "context": "See context from dependencies", "artifact": "Record output file/artifact" },
-                "completion": { "done": "Mark task complete (non-verified)", "submit": "Submit for review (verified tasks)", "fail": "Mark failed (can be retried)", "abandon": "Give up permanently" }
+                "completion": { "done": "Mark task complete", "fail": "Mark failed (can be retried)", "abandon": "Give up permanently" }
             },
             "loops": {
                 "description": "Loop edges model repeating workflows. A loops_to edge fires when its task completes, resetting a target back to open and incrementing loop_iteration.",
@@ -227,7 +223,6 @@ mod tests {
                 "If no coordinator: ready → claim → work → done",
                 "Run 'wg log' BEFORE starting work to track progress",
                 "Use 'wg context' to understand what dependencies produced",
-                "If 'wg done' fails, the task may require verification - use 'wg submit'",
                 "Check 'wg blocked <task-id>' if a task isn't appearing in ready list"
             ]
         });

@@ -58,7 +58,6 @@ pub fn run(dir: &Path, status_filter: Option<&str>, json: bool) -> Result<()> {
                 Status::Blocked => "[!]",
                 Status::Failed => "[F]",
                 Status::Abandoned => "[A]",
-                Status::PendingReview => "[R]",
             };
             let delay_str = format_ready_after_hint(task.ready_after.as_deref());
             println!("{} {} - {}{}", status, task.id, task.title, delay_str);

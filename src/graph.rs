@@ -42,9 +42,9 @@ pub fn parse_delay(s: &str) -> Option<u64> {
     let num: u64 = num_part.parse().ok()?;
     match unit {
         "s" => Some(num),
-        "m" => Some(num * 60),
-        "h" => Some(num * 3600),
-        "d" => Some(num * 86400),
+        "m" => num.checked_mul(60),
+        "h" => num.checked_mul(3600),
+        "d" => num.checked_mul(86400),
         _ => None,
     }
 }
@@ -68,7 +68,7 @@ pub struct Estimate {
 }
 
 /// Task status
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
     #[default]
@@ -78,8 +78,37 @@ pub enum Status {
     Blocked,
     Failed,
     Abandoned,
-    /// Work complete, awaiting verification/review
-    PendingReview,
+}
+
+/// Custom deserializer that maps legacy "pending-review" status to Done.
+impl<'de> serde::Deserialize<'de> for Status {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "open" => Ok(Status::Open),
+            "in-progress" => Ok(Status::InProgress),
+            "done" => Ok(Status::Done),
+            "blocked" => Ok(Status::Blocked),
+            "failed" => Ok(Status::Failed),
+            "abandoned" => Ok(Status::Abandoned),
+            // Migration: pending-review is treated as done
+            "pending-review" => Ok(Status::Done),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &[
+                    "open",
+                    "in-progress",
+                    "done",
+                    "blocked",
+                    "failed",
+                    "abandoned",
+                ],
+            )),
+        }
+    }
 }
 
 /// A task node.
@@ -324,14 +353,6 @@ pub struct Resource {
     pub unit: Option<String>,
 }
 
-/// Node kind discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NodeKind {
-    Task,
-    Resource,
-}
-
 /// A node in the work graph (task or resource)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -348,16 +369,13 @@ impl Node {
             Node::Resource(r) => &r.id,
         }
     }
-
-    pub fn kind(&self) -> NodeKind {
-        match self {
-            Node::Task(_) => NodeKind::Task,
-            Node::Resource(_) => NodeKind::Resource,
-        }
-    }
 }
 
-/// The work graph: a collection of nodes with embedded edges
+/// The work graph: a DAG of tasks and resources with embedded dependency edges.
+///
+/// Tasks depend on other tasks via `blocked_by`/`blocks` edges. Resources are
+/// consumed by tasks via `requires` edges. The graph is persisted as JSONL
+/// (one node per line) and supports concurrent readers via atomic writes.
 #[derive(Debug, Clone, Default)]
 pub struct WorkGraph {
     nodes: HashMap<String, Node>,
@@ -966,11 +984,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "attempt to multiply with overflow")]
-    fn test_parse_delay_overflow_panics() {
+    fn test_parse_delay_overflow_returns_none() {
         // u64::MAX / 86400 < 213_503_982_334_601, so this day value overflows
-        // The function panics on overflow due to unchecked multiplication
-        let _ = parse_delay("213503982334602d");
+        // The function returns None on overflow instead of panicking
+        assert_eq!(parse_delay("213503982334602d"), None);
+        assert_eq!(parse_delay("999999999999999999h"), None);
+        assert_eq!(parse_delay("999999999999999999m"), None);
     }
 
     #[test]

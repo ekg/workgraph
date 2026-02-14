@@ -8,7 +8,7 @@ use workgraph::graph::{Status, WorkGraph};
 use workgraph::parser::load_graph;
 use workgraph::query::{build_reverse_index, ready_tasks};
 
-use super::graph_path;
+use super::{collect_transitive_dependents, graph_path};
 
 // Re-use cycle classification from loops module
 use super::loops::{ClassifiedCycle, CycleClassification};
@@ -180,7 +180,7 @@ fn compute_summary(graph: &WorkGraph) -> Summary {
                     estimated_cost += est.cost.unwrap_or(0.0);
                 }
             }
-            Status::InProgress | Status::PendingReview => {
+            Status::InProgress => {
                 in_progress += 1;
                 // Include in-progress tasks in remaining estimates
                 if let Some(ref est) = task.estimate {
@@ -520,21 +520,6 @@ fn compute_bottlenecks(graph: &WorkGraph, now: &DateTime<Utc>) -> Vec<Bottleneck
     bottlenecks
 }
 
-/// Recursively collect all transitive dependents
-fn collect_transitive_dependents(
-    reverse_index: &HashMap<String, Vec<String>>,
-    task_id: &str,
-    visited: &mut HashSet<String>,
-) {
-    if let Some(dependents) = reverse_index.get(task_id) {
-        for dep_id in dependents {
-            if visited.insert(dep_id.clone()) {
-                collect_transitive_dependents(reverse_index, dep_id, visited);
-            }
-        }
-    }
-}
-
 /// Compute workload information from task assignments
 fn compute_workload(graph: &WorkGraph) -> WorkloadSection {
     let mut actor_hours: HashMap<String, f64> = HashMap::new();
@@ -773,7 +758,6 @@ fn print_human_readable(output: &AnalysisOutput) {
                 Status::Blocked => "blocked".to_string(),
                 Status::Failed => "failed".to_string(),
                 Status::Abandoned => "abandoned".to_string(),
-                Status::PendingReview => "pending-review".to_string(),
             };
 
             let assigned_str = bottleneck
@@ -1225,11 +1209,11 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_summary_pending_review_counted_as_in_progress() {
+    fn test_compute_summary_done_not_counted_as_in_progress() {
         let mut graph = WorkGraph::new();
 
-        let mut t1 = make_task("t1", "Pending review");
-        t1.status = Status::PendingReview;
+        let mut t1 = make_task("t1", "Done task");
+        t1.status = Status::Done;
         t1.estimate = Some(Estimate {
             hours: Some(5.0),
             cost: Some(200.0),
@@ -1237,9 +1221,9 @@ mod tests {
         graph.add_node(Node::Task(t1));
 
         let summary = compute_summary(&graph);
-        assert_eq!(summary.in_progress, 1);
-        assert_eq!(summary.estimated_hours, 5.0);
-        assert_eq!(summary.estimated_cost, 200.0);
+        assert_eq!(summary.in_progress, 0);
+        assert_eq!(summary.estimated_hours, 0.0);
+        assert_eq!(summary.estimated_cost, 0.0);
     }
 
     #[test]
@@ -2191,8 +2175,8 @@ mod tests {
         let mut t6 = make_task("t6", "Abandoned");
         t6.status = Status::Abandoned;
 
-        let mut t7 = make_task("t7", "Pending review");
-        t7.status = Status::PendingReview;
+        let mut t7 = make_task("t7", "Done too");
+        t7.status = Status::Done;
 
         graph.add_node(Node::Task(t1));
         graph.add_node(Node::Task(t2));

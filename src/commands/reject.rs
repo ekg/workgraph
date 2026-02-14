@@ -1,7 +1,8 @@
-//! Reject command - send a pending-review task back for rework
+//! Reject command - DEPRECATED, use evaluate-* tasks instead.
 //!
-//! Used by reviewers to reject work submitted by agents.
-//! Sets the task back to Open so it can be claimed and reworked.
+//! The pending-review status has been removed. If you need to send a
+//! completed task back for rework, use `wg edit <id> --status open` or
+//! create an evaluate-* task in the graph.
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -12,6 +13,8 @@ use workgraph::parser::{load_graph, save_graph};
 use super::graph_path;
 
 pub fn run(dir: &Path, task_id: &str, reason: Option<&str>, actor: Option<&str>) -> Result<()> {
+    eprintln!("Warning: 'wg reject' is deprecated and will be removed in a future release.");
+
     let path = graph_path(dir);
 
     if !path.exists() {
@@ -24,10 +27,10 @@ pub fn run(dir: &Path, task_id: &str, reason: Option<&str>, actor: Option<&str>)
         .get_task_mut(task_id)
         .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", task_id))?;
 
-    // Only allow reject from PendingReview
-    if task.status != Status::PendingReview {
+    // Allow reject from Done or InProgress
+    if task.status != Status::Done && task.status != Status::InProgress {
         anyhow::bail!(
-            "Cannot reject task '{}': status is {:?}, expected PendingReview",
+            "Cannot reject task '{}': status is {:?}, expected Done or InProgress",
             task_id,
             task.status
         );
@@ -111,10 +114,10 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_pending_review_to_open() {
+    fn test_reject_done_task_to_open() {
         let tmp = tempdir().unwrap();
         let dir = tmp.path().join(".workgraph");
-        let mut task = make_task("t1", "Test task", Status::PendingReview);
+        let mut task = make_task("t1", "Test task", Status::Done);
         task.assigned = Some("agent-1".to_string());
         setup_workgraph(&dir, vec![task]);
 
@@ -126,25 +129,10 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_clears_assigned() {
-        let tmp = tempdir().unwrap();
-        let dir = tmp.path().join(".workgraph");
-        let mut task = make_task("t1", "Test task", Status::PendingReview);
-        task.assigned = Some("agent-1".to_string());
-        setup_workgraph(&dir, vec![task]);
-
-        run(&dir, "t1", None, None).unwrap();
-
-        let graph = load_graph(graph_path(&dir)).unwrap();
-        let t = graph.get_task("t1").unwrap();
-        assert_eq!(t.assigned, None);
-    }
-
-    #[test]
     fn test_reject_increments_retry_count() {
         let tmp = tempdir().unwrap();
         let dir = tmp.path().join(".workgraph");
-        let mut task = make_task("t1", "Test task", Status::PendingReview);
+        let mut task = make_task("t1", "Test task", Status::Done);
         task.retry_count = 2;
         setup_workgraph(&dir, vec![task]);
 
@@ -156,70 +144,13 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_stores_reason_in_log() {
+    fn test_reject_error_on_open_task() {
         let tmp = tempdir().unwrap();
         let dir = tmp.path().join(".workgraph");
-        let task = make_task("t1", "Test task", Status::PendingReview);
+        let task = make_task("t1", "Test task", Status::Open);
         setup_workgraph(&dir, vec![task]);
 
-        run(&dir, "t1", Some("Tests are failing"), Some("reviewer")).unwrap();
-
-        let graph = load_graph(graph_path(&dir)).unwrap();
-        let t = graph.get_task("t1").unwrap();
-        assert_eq!(t.log.len(), 1);
-        assert!(t.log[0].message.contains("Tests are failing"));
-        assert_eq!(t.log[0].actor, Some("reviewer".to_string()));
-    }
-
-    #[test]
-    fn test_reject_without_reason_logs_default() {
-        let tmp = tempdir().unwrap();
-        let dir = tmp.path().join(".workgraph");
-        let task = make_task("t1", "Test task", Status::PendingReview);
-        setup_workgraph(&dir, vec![task]);
-
-        run(&dir, "t1", None, None).unwrap();
-
-        let graph = load_graph(graph_path(&dir)).unwrap();
-        let t = graph.get_task("t1").unwrap();
-        assert!(t.log[0].message.contains("no reason given"));
-    }
-
-    #[test]
-    fn test_reject_error_on_non_pending_review() {
-        let tmp = tempdir().unwrap();
-        let dir = tmp.path().join(".workgraph");
-
-        for status in [
-            Status::Open,
-            Status::InProgress,
-            Status::Done,
-            Status::Failed,
-            Status::Blocked,
-        ] {
-            let task = make_task("t1", "Test task", status.clone());
-            setup_workgraph(&dir, vec![task]);
-
-            let result = run(&dir, "t1", None, None);
-            assert!(result.is_err(), "Expected error for status {:?}", status);
-            let err = result.unwrap_err().to_string();
-            assert!(
-                err.contains("expected PendingReview"),
-                "Error for {:?} should mention PendingReview: {}",
-                status,
-                err
-            );
-        }
-    }
-
-    #[test]
-    fn test_reject_error_on_nonexistent_task() {
-        let tmp = tempdir().unwrap();
-        let dir = tmp.path().join(".workgraph");
-        setup_workgraph(&dir, vec![]);
-
-        let result = run(&dir, "nonexistent", None, None);
+        let result = run(&dir, "t1", None, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 }

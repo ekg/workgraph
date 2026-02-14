@@ -19,7 +19,7 @@ Tasks are the fundamental units of work. Each task has:
 
 - **id**: Unique identifier (auto-generated from title or specified manually)
 - **title**: Human-readable description of the work
-- **status**: Current state (open, in-progress, done, pending-review, failed, abandoned)
+- **status**: Current state (open, in-progress, done, failed, abandoned)
 - **blocked_by**: List of task IDs that must complete before this task can start
 - **assigned**: Agent currently working on the task
 - **estimate**: Optional hours and/or cost estimate
@@ -31,24 +31,23 @@ Tasks are the fundamental units of work. Each task has:
 ### Status Flow
 
 ```
-     ┌──────────────────────────────────────────┐
-     │                                          │
-     v                                          │
-   open ──────> in-progress ──────> pending-review ──────> done
-     │              │                    │                   │
-     │              │                    │                   │
-     │              v                    v                   │
-     │          failed ────────> (retry) ───────────────────┘
+     ┌──────────────────────────────────┐
+     │                                  │
+     v                                  │
+   open ──────> in-progress ──────> done
+     │              │                   │
+     │              │                   │
+     │              v                   │
+     │          failed ────> (retry) ───┘
      │              │
      │              v
      │         abandoned
      │
-     └──────────────────────────────────────────────────────────> abandoned
+     └──────────────────────────────────> abandoned
 ```
 
 - **open**: Task exists but work has not started
 - **in-progress**: Task has been claimed and is being worked on
-- **pending-review**: Task is complete but awaiting approval
 - **done**: Task completed successfully
 - **failed**: Task attempted but failed (can be retried)
 - **abandoned**: Task will not be completed (terminal state)

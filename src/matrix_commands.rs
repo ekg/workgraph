@@ -325,6 +325,7 @@ pub fn execute_claim(workgraph_dir: &Path, task_id: &str, actor: Option<&str>) -
     };
 
     match task.status {
+        Status::Open | Status::Blocked => {}
         Status::InProgress => {
             let holder = task
                 .assigned
@@ -336,7 +337,15 @@ pub fn execute_claim(workgraph_dir: &Path, task_id: &str, actor: Option<&str>) -
         Status::Done => {
             return format!("Task '{}' is already done", task_id);
         }
-        _ => {}
+        Status::Failed => {
+            return format!(
+                "Cannot claim task '{}': task is Failed. Use 'wg retry' first.",
+                task_id
+            );
+        }
+        Status::Abandoned => {
+            return format!("Cannot claim task '{}': task is Abandoned", task_id);
+        }
     }
 
     task.status = Status::InProgress;

@@ -453,7 +453,7 @@ fn test_state_persistence_roundtrip_all_statuses() {
         ("s-blocked", Status::Blocked),
         ("s-failed", Status::Failed),
         ("s-abandoned", Status::Abandoned),
-        ("s-pending-review", Status::PendingReview),
+        ("s-done-2", Status::Done),
     ];
 
     let mut graph = WorkGraph::new();

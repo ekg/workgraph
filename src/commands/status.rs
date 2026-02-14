@@ -259,7 +259,7 @@ fn gather_task_summary(dir: &Path) -> Result<TaskSummaryInfo> {
                     }
                 }
             }
-            Status::InProgress | Status::PendingReview => {
+            Status::InProgress => {
                 in_progress += 1;
             }
             Status::Done => {

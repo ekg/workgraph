@@ -65,10 +65,30 @@ pub mod viz;
 pub mod why_blocked;
 pub mod workload;
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub fn graph_path(dir: &Path) -> std::path::PathBuf {
     dir.join("graph.jsonl")
+}
+
+/// Collect all transitive dependents of a task using a reverse dependency index.
+///
+/// Given a `reverse_index` mapping task IDs to their direct dependents,
+/// recursively collects all tasks that transitively depend on `task_id`.
+/// Results are accumulated in `visited` (which also prevents cycles).
+pub fn collect_transitive_dependents(
+    reverse_index: &HashMap<String, Vec<String>>,
+    task_id: &str,
+    visited: &mut HashSet<String>,
+) {
+    if let Some(dependents) = reverse_index.get(task_id) {
+        for dep_id in dependents {
+            if visited.insert(dep_id.clone()) {
+                collect_transitive_dependents(reverse_index, dep_id, visited);
+            }
+        }
+    }
 }
 
 /// Best-effort notification to the service daemon that the graph has changed.

@@ -30,16 +30,15 @@ pub struct TaskEntry {
 }
 
 impl TaskEntry {
-    /// Sort key: in-progress=0, open(ready)=1, pending-review=2, failed=3, blocked=4, done=5, abandoned=6
+    /// Sort key: in-progress=0, open(ready)=1, failed=2, blocked=3, done=4, abandoned=5
     fn sort_key(&self) -> u8 {
         match self.status {
             Status::InProgress => 0,
             Status::Open => 1,
-            Status::PendingReview => 2,
-            Status::Failed => 3,
-            Status::Blocked => 4,
-            Status::Done => 5,
-            Status::Abandoned => 6,
+            Status::Failed => 2,
+            Status::Blocked => 3,
+            Status::Done => 4,
+            Status::Abandoned => 5,
         }
     }
 }
@@ -776,11 +775,10 @@ fn sort_key_for_status(status: &Status) -> u8 {
     match status {
         Status::InProgress => 0,
         Status::Open => 1,
-        Status::PendingReview => 2,
-        Status::Failed => 3,
-        Status::Blocked => 4,
-        Status::Done => 5,
-        Status::Abandoned => 6,
+        Status::Failed => 2,
+        Status::Blocked => 3,
+        Status::Done => 4,
+        Status::Abandoned => 5,
     }
 }
 
@@ -904,7 +902,6 @@ pub struct TaskCounts {
     pub ready: usize,
     pub blocked: usize,
     pub failed: usize,
-    pub pending_review: usize,
     pub total: usize,
 }
 
@@ -1119,7 +1116,6 @@ impl App {
                 Status::Open => counts.ready += 1,
                 Status::Blocked => counts.blocked += 1,
                 Status::Failed => counts.failed += 1,
-                Status::PendingReview => counts.pending_review += 1,
                 Status::Abandoned => counts.done += 1,
             }
         }
@@ -1548,11 +1544,10 @@ mod tests {
         let statuses = [
             (Status::InProgress, 0u8),
             (Status::Open, 1),
-            (Status::PendingReview, 2),
-            (Status::Failed, 3),
-            (Status::Blocked, 4),
-            (Status::Done, 5),
-            (Status::Abandoned, 6),
+            (Status::Failed, 2),
+            (Status::Blocked, 3),
+            (Status::Done, 4),
+            (Status::Abandoned, 5),
         ];
         for (status, expected) in &statuses {
             let entry = TaskEntry {
@@ -1575,7 +1570,6 @@ mod tests {
         let ordered = [
             Status::InProgress,
             Status::Open,
-            Status::PendingReview,
             Status::Failed,
             Status::Blocked,
             Status::Done,
@@ -1625,7 +1619,6 @@ mod tests {
         assert_eq!(status_color(&Status::Open), Color::White);
         assert_eq!(status_color(&Status::Failed), Color::Red);
         assert_eq!(status_color(&Status::Blocked), Color::DarkGray);
-        assert_eq!(status_color(&Status::PendingReview), Color::Cyan);
         assert_eq!(status_color(&Status::Abandoned), Color::DarkGray);
     }
 
@@ -1637,7 +1630,6 @@ mod tests {
         assert_eq!(status_indicator(&Status::Open), "[ ]");
         assert_eq!(status_indicator(&Status::Failed), "[!]");
         assert_eq!(status_indicator(&Status::Blocked), "[B]");
-        assert_eq!(status_indicator(&Status::PendingReview), "[?]");
         assert_eq!(status_indicator(&Status::Abandoned), "[-]");
     }
 

@@ -28,14 +28,14 @@ pub fn run(
         .get_task(task_id)
         .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", task_id))?;
 
-    // Step 1: Verify task is done, pending-review, or failed
+    // Step 1: Verify task is done or failed
     // Failed tasks are also evaluated — there is useful signal in what kinds
     // of tasks cause which agents to fail (see §4.3 of agency design).
     match task.status {
-        Status::Done | Status::PendingReview | Status::Failed => {}
+        Status::Done | Status::Failed => {}
         ref other => {
             bail!(
-                "Task '{}' has status {:?} — must be done, pending-review, or failed to evaluate",
+                "Task '{}' has status {:?} — must be done or failed to evaluate",
                 task_id,
                 other
             );

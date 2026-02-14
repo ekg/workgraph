@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 pub mod agency;
 pub mod check;
 pub mod config;
@@ -16,9 +14,7 @@ pub mod usage;
 
 pub use check::{CheckResult, check_cycles, check_orphans};
 pub use config::{AgencyConfig, Config, HelpConfig, MatrixConfig};
-pub use graph::{
-    Estimate, Node, NodeKind, Resource, Task, TrustLevel, WorkGraph, evaluate_loop_edges,
-};
+pub use graph::{Estimate, Node, Resource, Task, TrustLevel, WorkGraph, evaluate_loop_edges};
 #[cfg(feature = "matrix")]
 pub use matrix::commands::{MatrixCommand, help_text as matrix_help_text};
 #[cfg(feature = "matrix")]

@@ -44,17 +44,6 @@ pub fn run(dir: &Path, id: &str) -> Result<()> {
     // Re-acquire mutable reference after immutable borrow
     let task = graph.get_task_mut(id).unwrap();
 
-    // Verified tasks must use submit -> approve workflow
-    if task.verify.is_some() {
-        anyhow::bail!(
-            "Task '{}' requires verification. Use 'wg submit {}' instead of 'wg done'.\n\
-             After submission, a reviewer must use 'wg approve {}' to complete it.",
-            id,
-            id,
-            id
-        );
-    }
-
     task.status = Status::Done;
     task.completed_at = Some(Utc::now().to_rfc3339());
 
@@ -230,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn test_done_verified_task_rejects_with_submit_hint() {
+    fn test_done_verified_task_succeeds() {
         let dir = tempdir().unwrap();
         let dir_path = dir.path();
 
@@ -239,11 +228,14 @@ mod tests {
 
         setup_workgraph(dir_path, vec![task]);
 
+        // Verified tasks can now use wg done directly (submit is deprecated)
         let result = run(dir_path, "t1");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("requires verification"));
-        assert!(err.to_string().contains("wg submit"));
+        assert!(result.is_ok());
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+        let task = graph.get_task("t1").unwrap();
+        assert_eq!(task.status, Status::Done);
     }
 
     #[test]

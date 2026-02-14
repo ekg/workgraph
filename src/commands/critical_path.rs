@@ -188,7 +188,6 @@ pub fn run(dir: &Path, json: bool) -> Result<()> {
                     Status::Done => "done",
                     Status::Failed => "failed",
                     Status::Abandoned => "abandoned",
-                    Status::PendingReview => "pending-review",
                 };
 
                 let hours_str = task

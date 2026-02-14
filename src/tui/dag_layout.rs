@@ -1308,7 +1308,6 @@ fn status_indicator_str(status: &Status) -> &'static str {
         Status::Open => "○",
         Status::Failed => "!",
         Status::Blocked => "B",
-        Status::PendingReview => "?",
         Status::Abandoned => "-",
     }
 }

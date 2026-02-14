@@ -1,9 +1,9 @@
 //! Integration tests for the review workflow (submit, approve, reject).
 //!
 //! Tests the complete lifecycle of tasks that require verification:
-//! - Submitting work for review (InProgress -> PendingReview)
-//! - Approving work (PendingReview -> Done)
-//! - Rejecting work (PendingReview -> Open with retry_count incremented)
+//! - Submitting work (InProgress -> Done, delegates to `wg done`)
+//! - Approving work (any -> Done, delegates to `wg done`)
+//! - Rejecting work (Done or InProgress -> Open with retry_count incremented)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,11 +109,11 @@ fn setup_workgraph(tmp: &TempDir) -> std::path::PathBuf {
 // ===========================================================================
 
 #[test]
-fn test_submit_requires_in_progress_status() {
+fn test_submit_delegates_to_done_for_open_task() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a task that's Open (not InProgress)
+    // Create a task that's Open
     let mut graph = WorkGraph::new();
     let mut task = make_task("task-1", "Test Task", Status::Open);
     task.verify = Some("Must be perfect".to_string());
@@ -122,45 +122,41 @@ fn test_submit_requires_in_progress_status() {
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Try to submit - should fail because status is not InProgress
+    // Submit now delegates to done, so Open tasks succeed
     let output = wg_cmd(&wg_dir, &["submit", "task-1"]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("InProgress"));
+    assert!(output.status.success());
+
+    // Verify task is Done
+    let loaded = load_graph(&graph_path).unwrap();
+    let task = loaded.get_task("task-1").unwrap();
+    assert_eq!(task.status, Status::Done);
 }
 
 #[test]
-fn test_submit_transitions_to_pending_review() {
+fn test_submit_transitions_to_done() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
     // Create an InProgress task
     let mut graph = WorkGraph::new();
     let mut task = make_task("task-1", "Test Task", Status::InProgress);
-    task.verify = Some("Must be perfect".to_string());
     task.assigned = Some("agent-1".to_string());
     graph.add_node(Node::Task(task));
 
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Submit the task
+    // Submit the task (now delegates to done)
     wg_ok(&wg_dir, &["submit", "task-1"]);
 
-    // Verify status changed to PendingReview
+    // Verify status changed to Done
     let loaded = load_graph(&graph_path).unwrap();
     let task = loaded.get_task("task-1").unwrap();
-    assert_eq!(task.status, Status::PendingReview);
+    assert_eq!(task.status, Status::Done);
 
     // Verify log entry was added
     assert!(!task.log.is_empty());
-    assert!(
-        task.log
-            .last()
-            .unwrap()
-            .message
-            .contains("submitted for review")
-    );
+    assert!(task.log.last().unwrap().message.contains("done"));
 }
 
 #[test]
@@ -196,29 +192,25 @@ fn test_submit_checks_blockers() {
 // ===========================================================================
 
 #[test]
-fn test_reject_requires_pending_review_status() {
+fn test_reject_requires_done_or_in_progress_status() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a task that's InProgress (not PendingReview)
+    // Create a task that's Open (not Done or InProgress)
     let mut graph = WorkGraph::new();
-    graph.add_node(Node::Task(make_task(
-        "task-1",
-        "Test Task",
-        Status::InProgress,
-    )));
+    graph.add_node(Node::Task(make_task("task-1", "Test Task", Status::Open)));
 
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Try to reject - should fail because status is not PendingReview
+    // Try to reject - should fail because status is not Done or InProgress
     let output = wg_cmd(
         &wg_dir,
         &["reject", "task-1", "--reason", "Not good enough"],
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("PendingReview"));
+    assert!(stderr.contains("Done or InProgress"));
 }
 
 #[test]
@@ -226,9 +218,9 @@ fn test_reject_transitions_back_to_open() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a PendingReview task
+    // Create a Done task
     let mut graph = WorkGraph::new();
-    let mut task = make_task("task-1", "Test Task", Status::PendingReview);
+    let mut task = make_task("task-1", "Test Task", Status::Done);
     task.verify = Some("Must be perfect".to_string());
     task.assigned = Some("agent-1".to_string());
     task.retry_count = 0;
@@ -243,7 +235,7 @@ fn test_reject_transitions_back_to_open() {
         &["reject", "task-1", "--reason", "Not perfect enough"],
     );
 
-    // Verify status changed back to Open
+    // Verify status changed to Open
     let loaded = load_graph(&graph_path).unwrap();
     let task = loaded.get_task("task-1").unwrap();
     assert_eq!(task.status, Status::Open);
@@ -266,9 +258,9 @@ fn test_reject_without_reason() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a PendingReview task
+    // Create a Done task
     let mut graph = WorkGraph::new();
-    let task = make_task("task-1", "Test Task", Status::PendingReview);
+    let task = make_task("task-1", "Test Task", Status::Done);
     graph.add_node(Node::Task(task));
 
     let graph_path = wg_dir.join("graph.jsonl");
@@ -289,9 +281,9 @@ fn test_reject_increments_retry_count() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a PendingReview task with existing retry_count
+    // Create a Done task with existing retry_count
     let mut graph = WorkGraph::new();
-    let mut task = make_task("task-1", "Test Task", Status::PendingReview);
+    let mut task = make_task("task-1", "Test Task", Status::Done);
     task.retry_count = 2;
     graph.add_node(Node::Task(task));
 
@@ -312,11 +304,11 @@ fn test_reject_increments_retry_count() {
 // ===========================================================================
 
 #[test]
-fn test_approve_requires_pending_review_status() {
+fn test_approve_transitions_in_progress_to_done() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a task that's InProgress (not PendingReview)
+    // Create a task that's InProgress
     let mut graph = WorkGraph::new();
     graph.add_node(Node::Task(make_task(
         "task-1",
@@ -327,11 +319,12 @@ fn test_approve_requires_pending_review_status() {
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Try to approve - should fail because status is not PendingReview
-    let output = wg_cmd(&wg_dir, &["approve", "task-1"]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("PendingReview"));
+    // Approve now delegates to done, so InProgress -> Done succeeds
+    wg_ok(&wg_dir, &["approve", "task-1"]);
+
+    let loaded = load_graph(&graph_path).unwrap();
+    let task = loaded.get_task("task-1").unwrap();
+    assert_eq!(task.status, Status::Done);
 }
 
 #[test]
@@ -339,16 +332,16 @@ fn test_approve_transitions_to_done() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create a PendingReview task
+    // Create an InProgress task
     let mut graph = WorkGraph::new();
-    let mut task = make_task("task-1", "Test Task", Status::PendingReview);
+    let mut task = make_task("task-1", "Test Task", Status::InProgress);
     task.verify = Some("Must be perfect".to_string());
     graph.add_node(Node::Task(task));
 
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Approve the task
+    // Approve the task (delegates to done)
     wg_ok(&wg_dir, &["approve", "task-1"]);
 
     // Verify status changed to Done
@@ -361,7 +354,7 @@ fn test_approve_transitions_to_done() {
 
     // Verify log entry was added
     assert!(!task.log.is_empty());
-    assert!(task.log.last().unwrap().message.contains("approved"));
+    assert!(task.log.last().unwrap().message.contains("done"));
 }
 
 #[test]
@@ -369,7 +362,7 @@ fn test_approve_checks_blockers() {
     let tmp = TempDir::new().unwrap();
     let wg_dir = setup_workgraph(&tmp);
 
-    // Create two tasks: one blocker (Open), one blocked (PendingReview)
+    // Create two tasks: one blocker (Open), one blocked (InProgress)
     let mut graph = WorkGraph::new();
     graph.add_node(Node::Task(make_task(
         "blocker",
@@ -377,7 +370,7 @@ fn test_approve_checks_blockers() {
         Status::Open,
     )));
 
-    let mut task = make_task("task-1", "Test Task", Status::PendingReview);
+    let mut task = make_task("task-1", "Test Task", Status::InProgress);
     task.blocked_by = vec!["blocker".to_string()];
     graph.add_node(Node::Task(task));
 
@@ -410,15 +403,15 @@ fn test_complete_review_cycle_with_rejection() {
     let graph_path = wg_dir.join("graph.jsonl");
     save_graph(&graph, &graph_path).unwrap();
 
-    // Step 2: Agent submits work for review
+    // Step 2: Agent submits work (now transitions to Done)
     wg_ok(&wg_dir, &["submit", "task-1"]);
 
     let loaded = load_graph(&graph_path).unwrap();
     let task = loaded.get_task("task-1").unwrap();
-    assert_eq!(task.status, Status::PendingReview);
+    assert_eq!(task.status, Status::Done);
     assert_eq!(task.retry_count, 0);
 
-    // Step 3: Reviewer rejects the work
+    // Step 3: Reviewer rejects the work (Done -> Open)
     wg_ok(
         &wg_dir,
         &["reject", "task-1", "--reason", "Tests are insufficient"],
@@ -438,28 +431,20 @@ fn test_complete_review_cycle_with_rejection() {
     task_mut.assigned = Some("agent-1".to_string());
     save_graph(&graph, &graph_path).unwrap();
 
-    // Step 5: Agent submits again
+    // Step 5: Agent submits again (transitions to Done)
     wg_ok(&wg_dir, &["submit", "task-1"]);
 
     let loaded = load_graph(&graph_path).unwrap();
     let task = loaded.get_task("task-1").unwrap();
-    assert_eq!(task.status, Status::PendingReview);
-    assert_eq!(task.retry_count, 1); // Still 1, submit doesn't increment
-
-    // Step 6: Reviewer approves this time
-    wg_ok(&wg_dir, &["approve", "task-1"]);
-
-    let loaded = load_graph(&graph_path).unwrap();
-    let task = loaded.get_task("task-1").unwrap();
     assert_eq!(task.status, Status::Done);
+    assert_eq!(task.retry_count, 1); // Still 1, submit doesn't increment
     assert!(task.completed_at.is_some());
 
     // Verify the complete log trail
-    assert!(task.log.len() >= 4); // submit, reject, submit, approve
+    assert!(task.log.len() >= 3); // submit (done), reject, submit (done)
     let messages: Vec<&str> = task.log.iter().map(|e| e.message.as_str()).collect();
-    assert!(messages.iter().any(|m| m.contains("submitted")));
+    assert!(messages.iter().any(|m| m.contains("done")));
     assert!(messages.iter().any(|m| m.contains("rejected")));
-    assert!(messages.iter().any(|m| m.contains("approved")));
 }
 
 #[test]
@@ -469,19 +454,18 @@ fn test_multiple_rejections_increment_retry_count() {
 
     let graph_path = wg_dir.join("graph.jsonl");
 
-    // Initial submission
+    // Initial task
     let mut graph = WorkGraph::new();
-    let mut task = make_task("task-1", "Perfectionist Task", Status::InProgress);
-    task.verify = Some("Must be absolutely perfect".to_string());
+    let task = make_task("task-1", "Perfectionist Task", Status::InProgress);
     graph.add_node(Node::Task(task));
     save_graph(&graph, &graph_path).unwrap();
 
-    // Submit, reject, update to InProgress cycle - three times
+    // Submit (-> Done), reject (-> Open), update to InProgress cycle - three times
     for i in 0..3 {
-        // Submit
+        // Submit (transitions to Done)
         wg_ok(&wg_dir, &["submit", "task-1"]);
 
-        // Reject
+        // Reject (Done -> Open)
         let reason = format!("Not perfect enough, attempt {}", i + 1);
         wg_ok(&wg_dir, &["reject", "task-1", "--reason", &reason]);
 

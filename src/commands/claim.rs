@@ -20,8 +20,9 @@ pub fn claim(dir: &Path, id: &str, actor: Option<&str>) -> Result<()> {
         .get_task_mut(id)
         .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", id))?;
 
-    // Fail if task is already InProgress or Done
+    // Only allow claiming tasks that are Open or Blocked
     match task.status {
+        Status::Open | Status::Blocked => {}
         Status::InProgress => {
             let since = task
                 .started_at
@@ -40,7 +41,15 @@ pub fn claim(dir: &Path, id: &str, actor: Option<&str>) -> Result<()> {
         Status::Done => {
             anyhow::bail!("Task '{}' is already done", id);
         }
-        _ => {}
+        Status::Failed => {
+            anyhow::bail!(
+                "Cannot claim task '{}': task is Failed. Use 'wg retry' to retry it.",
+                id
+            );
+        }
+        Status::Abandoned => {
+            anyhow::bail!("Cannot claim task '{}': task is Abandoned", id);
+        }
     }
 
     task.status = Status::InProgress;
@@ -91,9 +100,6 @@ pub fn unclaim(dir: &Path, id: &str) -> Result<()> {
         Status::Done => anyhow::bail!("Cannot unclaim task '{}': task is Done", id),
         Status::Failed => anyhow::bail!("Cannot unclaim task '{}': task is Failed", id),
         Status::Abandoned => anyhow::bail!("Cannot unclaim task '{}': task is Abandoned", id),
-        Status::PendingReview => {
-            anyhow::bail!("Cannot unclaim task '{}': task is PendingReview", id)
-        }
     }
 
     let prev_assigned = task.assigned.clone();
@@ -356,18 +362,31 @@ mod tests {
     }
 
     #[test]
-    fn test_unclaim_pending_review_task_fails() {
+    fn test_claim_failed_task_fails() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+        setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Failed)]);
+
+        let result = claim(dir_path, "t1", None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Failed"));
+        assert!(err.to_string().contains("retry"));
+    }
+
+    #[test]
+    fn test_claim_abandoned_task_fails() {
         let dir = tempdir().unwrap();
         let dir_path = dir.path();
         setup_workgraph(
             dir_path,
-            vec![make_task("t1", "Test task", Status::PendingReview)],
+            vec![make_task("t1", "Test task", Status::Abandoned)],
         );
 
-        let result = unclaim(dir_path, "t1");
+        let result = claim(dir_path, "t1", None);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("PendingReview"));
+        assert!(err.to_string().contains("Abandoned"));
     }
 
     #[test]

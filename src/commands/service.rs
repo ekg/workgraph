@@ -607,7 +607,7 @@ pub fn coordinator_tick(
                     return false;
                 }
                 // Only create for tasks that are active (Open, InProgress, Blocked)
-                // or already completed (Done, PendingReview, Failed) without an eval task
+                // or already completed (Done, Failed) without an eval task
                 !matches!(t.status, Status::Abandoned)
             })
             .map(|t| (t.id.clone(), t.title.clone()))
@@ -900,10 +900,7 @@ fn cleanup_dead_agents(dir: &Path, graph_path: &Path) -> Result<Vec<String>> {
     let graph = load_graph(graph_path).context("Failed to reload graph for output capture")?;
     for (_agent_id, task_id, _pid, _output_file, _reason) in &dead {
         if let Some(task) = graph.get_task(task_id)
-            && matches!(
-                task.status,
-                Status::Done | Status::PendingReview | Status::Failed
-            )
+            && matches!(task.status, Status::Done | Status::Failed)
         {
             let output_dir = dir.join("output").join(task_id);
             if !output_dir.exists() {
@@ -1114,12 +1111,7 @@ fn extract_triage_json(raw: &str) -> Option<String> {
 fn apply_triage_verdict(task: &mut Task, verdict: &TriageVerdict, agent_id: &str, pid: u32) {
     match verdict.verdict.as_str() {
         "done" => {
-            // If task has verification criteria, set to PendingReview instead of Done
-            if task.verify.is_some() {
-                task.status = Status::PendingReview;
-            } else {
-                task.status = Status::Done;
-            }
+            task.status = Status::Done;
             task.completed_at = Some(Utc::now().to_rfc3339());
             task.log.push(LogEntry {
                 timestamp: Utc::now().to_rfc3339(),
@@ -3175,7 +3167,7 @@ poll_interval = 120
             summary: "implementation complete".to_string(),
         };
         apply_triage_verdict(&mut task, &verdict, "agent-1", 1234);
-        assert_eq!(task.status, Status::PendingReview);
+        assert_eq!(task.status, Status::Done);
     }
 
     #[test]

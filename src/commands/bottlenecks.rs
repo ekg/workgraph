@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 use workgraph::graph::Status;
 use workgraph::parser::load_graph;
 use workgraph::query::build_reverse_index;
 
-use super::graph_path;
+use super::{collect_transitive_dependents, graph_path};
 
 /// Information about a bottleneck task
 #[derive(Debug, Serialize)]
@@ -104,7 +104,6 @@ pub fn run(dir: &Path, json: bool) -> Result<()> {
                 Status::Blocked => "blocked".to_string(),
                 Status::Failed => "FAILED (needs retry!)".to_string(),
                 Status::Abandoned => "abandoned".to_string(),
-                Status::PendingReview => "pending-review".to_string(),
             };
             print!("   Status: {}", status_str);
 
@@ -160,21 +159,6 @@ fn generate_recommendation(
             percentage
         )),
         _ => None,
-    }
-}
-
-/// Recursively collect all transitive dependents
-fn collect_transitive_dependents(
-    reverse_index: &HashMap<String, Vec<String>>,
-    task_id: &str,
-    visited: &mut HashSet<String>,
-) {
-    if let Some(dependents) = reverse_index.get(task_id) {
-        for dep_id in dependents {
-            if visited.insert(dep_id.clone()) {
-                collect_transitive_dependents(reverse_index, dep_id, visited);
-            }
-        }
     }
 }
 

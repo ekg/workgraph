@@ -131,13 +131,6 @@ pub struct Motivation {
     pub lineage: Lineage,
 }
 
-/// An agent's identity, composed of a role (what) and a motivation (why).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentIdentity {
-    pub role_id: String,
-    pub motivation_id: String,
-}
-
 fn default_executor() -> String {
     "claude".to_string()
 }

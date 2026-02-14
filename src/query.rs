@@ -84,7 +84,7 @@ pub fn project_summary(graph: &WorkGraph) -> ProjectSummary {
                 }
             }
             Status::Done => done += 1,
-            Status::InProgress | Status::PendingReview => in_progress += 1,
+            Status::InProgress => in_progress += 1,
             Status::Blocked => {
                 // Explicit blocked status also counts
                 blocked_count += 1;
@@ -1416,14 +1416,14 @@ mod tests {
     }
 
     #[test]
-    fn test_ready_tasks_excludes_pending_review() {
+    fn test_ready_tasks_excludes_done_status() {
         let mut graph = WorkGraph::new();
-        let mut task = make_task("t", "Pending review");
-        task.status = Status::PendingReview;
+        let mut task = make_task("t", "Done task");
+        task.status = Status::Done;
         graph.add_node(Node::Task(task));
 
         let ready = ready_tasks(&graph);
-        assert!(ready.is_empty(), "PendingReview tasks should not be ready");
+        assert!(ready.is_empty(), "Done tasks should not be ready");
     }
 
     // ========== is_time_ready with ready_after ==========

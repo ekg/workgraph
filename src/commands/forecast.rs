@@ -7,8 +7,8 @@ use workgraph::graph::{Status, WorkGraph};
 use workgraph::parser::load_graph;
 use workgraph::query::build_reverse_index;
 
-use super::graph_path;
 use super::velocity::calculate_velocity;
+use super::{collect_transitive_dependents, graph_path};
 
 /// Default number of weeks to analyze for velocity
 const DEFAULT_VELOCITY_WEEKS: usize = 4;
@@ -139,7 +139,7 @@ fn calculate_remaining_work(graph: &WorkGraph) -> RemainingWork {
         let hours = task.estimate.as_ref().and_then(|e| e.hours).unwrap_or(0.0);
 
         match task.status {
-            Status::InProgress | Status::PendingReview => {
+            Status::InProgress => {
                 in_progress_tasks += 1;
                 in_progress_hours += hours;
             }
@@ -301,21 +301,6 @@ fn find_key_blockers(graph: &WorkGraph) -> Vec<Blocker> {
 
     // Take top 5
     blockers.into_iter().take(5).collect()
-}
-
-/// Recursively collect all transitive dependents
-fn collect_transitive_dependents(
-    reverse_index: &HashMap<String, Vec<String>>,
-    task_id: &str,
-    visited: &mut HashSet<String>,
-) {
-    if let Some(dependents) = reverse_index.get(task_id) {
-        for dep_id in dependents {
-            if visited.insert(dep_id.clone()) {
-                collect_transitive_dependents(reverse_index, dep_id, visited);
-            }
-        }
-    }
 }
 
 /// Find the critical path (longest dependency chain by hours)

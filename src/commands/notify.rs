@@ -199,7 +199,6 @@ fn format_notification(task: &Task, custom_message: Option<&str>) -> (String, St
         Status::Blocked => "🚫",
         Status::Failed => "❌",
         Status::Abandoned => "🗑️",
-        Status::PendingReview => "👀",
     };
 
     let status_str = format_status(&task.status);
@@ -306,7 +305,6 @@ fn format_status(status: &Status) -> &'static str {
         Status::Blocked => "blocked",
         Status::Failed => "failed",
         Status::Abandoned => "abandoned",
-        Status::PendingReview => "pending-review",
     }
 }
 

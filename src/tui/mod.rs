@@ -1346,7 +1346,6 @@ pub(crate) fn status_indicator(status: &Status) -> &'static str {
         Status::Open => "[ ]",
         Status::Failed => "[!]",
         Status::Blocked => "[B]",
-        Status::PendingReview => "[?]",
         Status::Abandoned => "[-]",
     }
 }
@@ -1359,7 +1358,6 @@ pub(crate) fn status_color(status: &Status) -> Color {
         Status::Open => Color::White,
         Status::Failed => Color::Red,
         Status::Blocked => Color::DarkGray,
-        Status::PendingReview => Color::Cyan,
         Status::Abandoned => Color::DarkGray,
     }
 }

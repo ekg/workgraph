@@ -366,7 +366,6 @@ fn format_status(status: &Status) -> &'static str {
         Status::Blocked => "blocked",
         Status::Failed => "failed",
         Status::Abandoned => "abandoned",
-        Status::PendingReview => "pending-review",
     }
 }
 
@@ -490,7 +489,6 @@ mod tests {
         assert_eq!(format_status(&Status::Blocked), "blocked");
         assert_eq!(format_status(&Status::Failed), "failed");
         assert_eq!(format_status(&Status::Abandoned), "abandoned");
-        assert_eq!(format_status(&Status::PendingReview), "pending-review");
     }
 
     #[test]

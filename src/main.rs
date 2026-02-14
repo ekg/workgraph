@@ -190,33 +190,33 @@ enum Commands {
         loop_iteration: Option<u32>,
     },
 
-    /// Mark a task as done (fails for verified tasks - use submit instead)
+    /// Mark a task as done
     Done {
         /// Task ID to mark as done
         id: String,
     },
 
-    /// Submit work for review (for verified tasks)
+    /// [DEPRECATED] Behaves like 'wg done'. Use 'wg done' instead.
     Submit {
         /// Task ID to submit
         id: String,
 
-        /// Actor submitting the work
+        /// Actor submitting the work (ignored)
         #[arg(long)]
         actor: Option<String>,
     },
 
-    /// Approve a pending-review task (marks as done)
+    /// [DEPRECATED] Behaves like 'wg done'. Use 'wg done' instead.
     Approve {
         /// Task ID to approve
         id: String,
 
-        /// Actor approving the work
+        /// Actor approving the work (ignored)
         #[arg(long)]
         actor: Option<String>,
     },
 
-    /// Reject a pending-review task (returns to open for rework)
+    /// [DEPRECATED] Send a done task back to open for rework.
     Reject {
         /// Task ID to reject
         id: String,
