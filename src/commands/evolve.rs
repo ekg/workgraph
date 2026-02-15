@@ -321,7 +321,11 @@ pub fn run(
         if !evolver_entity_ids.is_empty()
             && let Some(ref target) = op.target_id
         {
-            let target_ids: Vec<&str> = target.split(',').map(|s| s.trim()).collect();
+            let target_ids: Vec<&str> = target
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
             if target_ids
                 .iter()
                 .any(|tid| evolver_entity_ids.contains(*tid))
@@ -1080,7 +1084,15 @@ fn apply_modify_role(
         .ok_or_else(|| anyhow::anyhow!("modify_role requires target_id"))?;
 
     // Support crossover: target_id may be "parent-a,parent-b"
-    let parent_ids: Vec<&str> = target_id.split(',').map(|s| s.trim()).collect();
+    let parent_ids: Vec<&str> = target_id
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if parent_ids.is_empty() {
+        anyhow::bail!("modify_role target_id produced zero valid parent IDs after parsing");
+    }
 
     // Find parent(s) and compute lineage
     let lineage = if parent_ids.len() == 1 {

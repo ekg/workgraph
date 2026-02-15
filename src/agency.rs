@@ -85,7 +85,7 @@ impl Lineage {
     pub fn mutation(parent_id: &str, parent_generation: u32, run_id: &str) -> Self {
         Lineage {
             parent_ids: vec![parent_id.to_string()],
-            generation: parent_generation + 1,
+            generation: parent_generation.saturating_add(1),
             created_by: format!("evolver-{}", run_id),
             created_at: Utc::now(),
         }
@@ -95,7 +95,7 @@ impl Lineage {
     pub fn crossover(parent_ids: &[&str], max_parent_generation: u32, run_id: &str) -> Self {
         Lineage {
             parent_ids: parent_ids.iter().map(|s| s.to_string()).collect(),
-            generation: max_parent_generation + 1,
+            generation: max_parent_generation.saturating_add(1),
             created_by: format!("evolver-{}", run_id),
             created_at: Utc::now(),
         }
@@ -969,15 +969,24 @@ pub fn recalculate_avg_score(evaluations: &[EvaluationRef]) -> Option<f64> {
     if evaluations.is_empty() {
         return None;
     }
-    let sum: f64 = evaluations.iter().map(|e| e.score).sum();
-    Some(sum / evaluations.len() as f64)
+    let valid_scores: Vec<f64> = evaluations
+        .iter()
+        .map(|e| e.score)
+        .filter(|s| s.is_finite())
+        .collect();
+    if valid_scores.is_empty() {
+        return None;
+    }
+    let sum: f64 = valid_scores.iter().sum();
+    let avg = sum / valid_scores.len() as f64;
+    if avg.is_finite() { Some(avg) } else { None }
 }
 
 /// Update a PerformanceRecord with a new evaluation reference.
 ///
 /// Increments task_count, appends the EvaluationRef, and recalculates avg_score.
 pub fn update_performance(record: &mut PerformanceRecord, eval_ref: EvaluationRef) {
-    record.task_count += 1;
+    record.task_count = record.task_count.saturating_add(1);
     record.evaluations.push(eval_ref);
     record.avg_score = recalculate_avg_score(&record.evaluations);
 }

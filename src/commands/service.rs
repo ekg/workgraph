@@ -739,12 +739,12 @@ pub fn coordinator_tick(
         }
     }
 
-    // Save graph once if it was modified during auto-assign or auto-evaluate
-    if graph_modified && let Err(e) = save_graph(&graph, &graph_path) {
-        eprintln!(
-            "[coordinator] Failed to save graph after auto-assign/auto-evaluate: {}",
-            e
-        );
+    // Save graph once if it was modified during auto-assign or auto-evaluate.
+    // Abort tick if save fails — continuing with unsaved state would spawn agents
+    // on tasks that haven't been persisted.
+    if graph_modified {
+        save_graph(&graph, &graph_path)
+            .context("Failed to save graph after auto-assign/auto-evaluate; aborting tick")?;
     }
 
     // Get final ready tasks (recalculated if graph was modified)
@@ -1160,11 +1160,32 @@ fn apply_triage_verdict(task: &mut Task, verdict: &TriageVerdict, agent_id: &str
             });
         }
         "continue" => {
+            // Check max_retries before allowing continue
+            if let Some(max) = task.max_retries
+                && task.retry_count >= max
+            {
+                task.status = Status::Failed;
+                task.failure_reason = Some(format!(
+                    "Max retries exceeded ({}/{}): {}",
+                    task.retry_count, max, verdict.reason
+                ));
+                task.assigned = None;
+                task.log.push(LogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    actor: Some("triage".to_string()),
+                    message: format!(
+                        "Triage: wanted continue but max retries exceeded ({}/{}) — failing task",
+                        task.retry_count, max
+                    ),
+                });
+                return;
+            }
+
             task.status = Status::Open;
             task.assigned = None;
             task.retry_count += 1;
 
-            // Append recovery context to description
+            // Replace (not append) recovery context to prevent unbounded description growth
             let recovery_context = format!(
                 "\n\n## Previous Attempt Recovery\n\
                  A previous agent worked on this task but died before completing.\n\n\
@@ -1174,6 +1195,10 @@ fn apply_triage_verdict(task: &mut Task, verdict: &TriageVerdict, agent_id: &str
                 verdict.summary
             );
             if let Some(ref mut desc) = task.description {
+                // Strip any existing recovery section before adding new one
+                if let Some(pos) = desc.find("\n\n## Previous Attempt Recovery") {
+                    desc.truncate(pos);
+                }
                 desc.push_str(&recovery_context);
             } else {
                 task.description = Some(recovery_context.trim_start().to_string());
@@ -1190,6 +1215,27 @@ fn apply_triage_verdict(task: &mut Task, verdict: &TriageVerdict, agent_id: &str
         }
         _ => {
             // "restart" or anything else: same as existing behavior
+            // Check max_retries before allowing restart
+            if let Some(max) = task.max_retries
+                && task.retry_count >= max
+            {
+                task.status = Status::Failed;
+                task.failure_reason = Some(format!(
+                    "Max retries exceeded ({}/{}): {}",
+                    task.retry_count, max, verdict.reason
+                ));
+                task.assigned = None;
+                task.log.push(LogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    actor: Some("triage".to_string()),
+                    message: format!(
+                        "Triage: wanted restart but max retries exceeded ({}/{}) — failing task",
+                        task.retry_count, max
+                    ),
+                });
+                return;
+            }
+
             task.status = Status::Open;
             task.assigned = None;
             task.retry_count += 1;
@@ -1946,10 +1992,9 @@ fn handle_request(
         IpcRequest::Pause => {
             logger.info("IPC Pause: pausing coordinator");
             daemon_cfg.paused = true;
-            if let Some(mut coord_state) = CoordinatorState::load(dir) {
-                coord_state.paused = true;
-                coord_state.save(dir);
-            }
+            let mut coord_state = CoordinatorState::load_or_default(dir);
+            coord_state.paused = true;
+            coord_state.save(dir);
             IpcResponse::success(serde_json::json!({
                 "status": "paused",
             }))
@@ -1957,10 +2002,9 @@ fn handle_request(
         IpcRequest::Resume => {
             logger.info("IPC Resume: resuming coordinator");
             daemon_cfg.paused = false;
-            if let Some(mut coord_state) = CoordinatorState::load(dir) {
-                coord_state.paused = false;
-                coord_state.save(dir);
-            }
+            let mut coord_state = CoordinatorState::load_or_default(dir);
+            coord_state.paused = false;
+            coord_state.save(dir);
             *wake_coordinator = true;
             IpcResponse::success(serde_json::json!({
                 "status": "resumed",
@@ -3314,5 +3358,105 @@ poll_interval = 120
         assert_eq!(task.retry_count, 1);
         // Description should NOT have recovery context for restart
         assert!(task.description.is_none());
+    }
+
+    #[test]
+    fn test_apply_triage_verdict_continue_max_retries_exceeded() {
+        let mut task = Task {
+            id: "t1".to_string(),
+            title: "Test".to_string(),
+            description: Some("Original".to_string()),
+            status: Status::InProgress,
+            assigned: Some("agent-1".to_string()),
+            estimate: None,
+            blocks: vec![],
+            blocked_by: vec![],
+            requires: vec![],
+            tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
+            artifacts: vec![],
+            exec: None,
+            not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
+            log: vec![],
+            retry_count: 3,
+            max_retries: Some(3),
+            failure_reason: None,
+            model: None,
+            verify: None,
+            agent: None,
+            loops_to: vec![],
+            loop_iteration: 0,
+            ready_after: None,
+        };
+        let verdict = TriageVerdict {
+            verdict: "continue".to_string(),
+            reason: "needs more work".to_string(),
+            summary: "partial progress".to_string(),
+        };
+        apply_triage_verdict(&mut task, &verdict, "agent-1", 1234);
+        assert_eq!(task.status, Status::Failed);
+        assert!(task.assigned.is_none());
+        assert_eq!(task.retry_count, 3); // not incremented
+        assert!(
+            task.failure_reason
+                .as_ref()
+                .unwrap()
+                .contains("Max retries exceeded")
+        );
+    }
+
+    #[test]
+    fn test_apply_triage_verdict_restart_max_retries_exceeded() {
+        let mut task = Task {
+            id: "t1".to_string(),
+            title: "Test".to_string(),
+            description: None,
+            status: Status::InProgress,
+            assigned: Some("agent-1".to_string()),
+            estimate: None,
+            blocks: vec![],
+            blocked_by: vec![],
+            requires: vec![],
+            tags: vec![],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
+            artifacts: vec![],
+            exec: None,
+            not_before: None,
+            created_at: None,
+            started_at: None,
+            completed_at: None,
+            log: vec![],
+            retry_count: 2,
+            max_retries: Some(2),
+            failure_reason: None,
+            model: None,
+            verify: None,
+            agent: None,
+            loops_to: vec![],
+            loop_iteration: 0,
+            ready_after: None,
+        };
+        let verdict = TriageVerdict {
+            verdict: "restart".to_string(),
+            reason: "no progress".to_string(),
+            summary: "".to_string(),
+        };
+        apply_triage_verdict(&mut task, &verdict, "agent-1", 1234);
+        assert_eq!(task.status, Status::Failed);
+        assert!(task.assigned.is_none());
+        assert_eq!(task.retry_count, 2); // not incremented
+        assert!(
+            task.failure_reason
+                .as_ref()
+                .unwrap()
+                .contains("Max retries exceeded")
+        );
     }
 }

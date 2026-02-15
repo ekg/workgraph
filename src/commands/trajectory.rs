@@ -59,7 +59,7 @@ pub fn find_trajectory(graph: &WorkGraph, start_id: &str) -> Result<Trajectory> 
     let mut visited = HashSet::new();
     let mut claim_order = Vec::new();
 
-    // BFS to find trajectory
+    // DFS to find trajectory (depth-first via LIFO pop)
     let mut queue: Vec<(&Task, usize, Vec<String>)> = vec![(start_task, 0, vec![])];
 
     while let Some((task, depth, receives)) = queue.pop() {
@@ -154,6 +154,7 @@ pub fn run(dir: &Path, task_id: &str, json: bool) -> Result<()> {
         }
         println!();
 
+        let max_depth = trajectory.steps.iter().map(|s| s.depth).max().unwrap_or(0);
         for step in &trajectory.steps {
             let indent = "  ".repeat(step.depth);
             let status_str = match step.status {
@@ -173,9 +174,7 @@ pub fn run(dir: &Path, task_id: &str, json: bool) -> Result<()> {
             if !step.receives.is_empty() {
                 println!("{}  ← receives: {}", indent, step.receives.join(", "));
             }
-            if !step.produces.is_empty()
-                && step.depth < trajectory.steps.iter().map(|s| s.depth).max().unwrap_or(0)
-            {
+            if !step.produces.is_empty() && step.depth < max_depth {
                 println!("{}  → produces: {}", indent, step.produces.join(", "));
             }
         }

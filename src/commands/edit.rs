@@ -37,153 +37,188 @@ pub fn run(
     // Load the graph
     let mut graph = load_graph(&path).context("Failed to load graph")?;
 
-    // Find the task
-    let task = graph
-        .get_task_mut(task_id)
-        .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", task_id))?;
+    // Validate task exists
+    if graph.get_task(task_id).is_none() {
+        anyhow::bail!("Task '{}' not found", task_id);
+    }
+
+    // Validate self-blocking
+    for dep in add_blocked_by {
+        if dep == task_id {
+            anyhow::bail!("Task '{}' cannot block itself", task_id);
+        }
+    }
+
+    // Validate self-loop
+    if let Some(target) = add_loops_to
+        && target == task_id
+    {
+        anyhow::bail!("Task '{}' cannot loop to itself", task_id);
+    }
 
     let mut changed = false;
 
-    // Update title
-    if let Some(new_title) = title {
-        task.title = new_title.to_string();
-        println!("Updated title: {}", new_title);
-        changed = true;
-    }
+    // Modify the task in a block so the mutable borrow is released afterwards
+    {
+        let task = graph.get_task_mut(task_id).unwrap();
 
-    // Update description
-    if let Some(new_description) = description {
-        task.description = Some(new_description.to_string());
-        println!("Updated description");
-        changed = true;
-    }
-
-    // Add blocked_by dependencies
-    for dep in add_blocked_by {
-        if !task.blocked_by.contains(dep) {
-            task.blocked_by.push(dep.clone());
-            println!("Added blocked_by: {}", dep);
+        // Update title
+        if let Some(new_title) = title {
+            task.title = new_title.to_string();
+            println!("Updated title: {}", new_title);
             changed = true;
-        } else {
-            println!("Already blocked by: {}", dep);
         }
-    }
 
-    // Remove blocked_by dependencies
-    for dep in remove_blocked_by {
-        if let Some(pos) = task.blocked_by.iter().position(|x| x == dep) {
-            task.blocked_by.remove(pos);
-            println!("Removed blocked_by: {}", dep);
+        // Update description
+        if let Some(new_description) = description {
+            task.description = Some(new_description.to_string());
+            println!("Updated description");
             changed = true;
-        } else {
-            println!("Not blocked by: {}", dep);
         }
-    }
 
-    // Add tags
-    for tag in add_tag {
-        if !task.tags.contains(tag) {
-            task.tags.push(tag.clone());
-            println!("Added tag: {}", tag);
-            changed = true;
-        } else {
-            println!("Already has tag: {}", tag);
-        }
-    }
-
-    // Remove tags
-    for tag in remove_tag {
-        if let Some(pos) = task.tags.iter().position(|x| x == tag) {
-            task.tags.remove(pos);
-            println!("Removed tag: {}", tag);
-            changed = true;
-        } else {
-            println!("Does not have tag: {}", tag);
-        }
-    }
-
-    // Update model
-    if let Some(new_model) = model {
-        task.model = Some(new_model.to_string());
-        println!("Updated model: {}", new_model);
-        changed = true;
-    }
-
-    // Add skills
-    for skill in add_skill {
-        if !task.skills.contains(skill) {
-            task.skills.push(skill.clone());
-            println!("Added skill: {}", skill);
-            changed = true;
-        } else {
-            println!("Already has skill: {}", skill);
-        }
-    }
-
-    // Remove skills
-    for skill in remove_skill {
-        if let Some(pos) = task.skills.iter().position(|x| x == skill) {
-            task.skills.remove(pos);
-            println!("Removed skill: {}", skill);
-            changed = true;
-        } else {
-            println!("Does not have skill: {}", skill);
-        }
-    }
-
-    // Add loops_to edge
-    if let Some(target) = add_loops_to {
-        let max_iterations = loop_max
-            .ok_or_else(|| anyhow::anyhow!("--loop-max is required when using --add-loops-to"))?;
-        let guard = match loop_guard {
-            Some(expr) => Some(crate::commands::add::parse_guard_expr(expr)?),
-            None => None,
-        };
-        let delay = match loop_delay {
-            Some(d) => {
-                parse_delay(d).ok_or_else(|| {
-                    anyhow::anyhow!("Invalid delay '{}'. Use format: 30s, 5m, 1h, 24h, 7d", d)
-                })?;
-                Some(d.to_string())
+        // Add blocked_by dependencies
+        for dep in add_blocked_by {
+            if !task.blocked_by.contains(dep) {
+                task.blocked_by.push(dep.clone());
+                println!("Added blocked_by: {}", dep);
+                changed = true;
+            } else {
+                println!("Already blocked by: {}", dep);
             }
-            None => None,
-        };
-        // Check for duplicate target
-        if task.loops_to.iter().any(|e| e.target == target) {
-            println!("Already has loops_to edge targeting: {}", target);
-        } else {
-            task.loops_to.push(LoopEdge {
-                target: target.to_string(),
-                guard,
-                max_iterations,
-                delay,
-            });
-            println!(
-                "Added loops_to: {} (max_iterations: {})",
-                target, max_iterations
-            );
+        }
+
+        // Remove blocked_by dependencies
+        for dep in remove_blocked_by {
+            if let Some(pos) = task.blocked_by.iter().position(|x| x == dep) {
+                task.blocked_by.remove(pos);
+                println!("Removed blocked_by: {}", dep);
+                changed = true;
+            } else {
+                println!("Not blocked by: {}", dep);
+            }
+        }
+
+        // Add tags
+        for tag in add_tag {
+            if !task.tags.contains(tag) {
+                task.tags.push(tag.clone());
+                println!("Added tag: {}", tag);
+                changed = true;
+            } else {
+                println!("Already has tag: {}", tag);
+            }
+        }
+
+        // Remove tags
+        for tag in remove_tag {
+            if let Some(pos) = task.tags.iter().position(|x| x == tag) {
+                task.tags.remove(pos);
+                println!("Removed tag: {}", tag);
+                changed = true;
+            } else {
+                println!("Does not have tag: {}", tag);
+            }
+        }
+
+        // Update model
+        if let Some(new_model) = model {
+            task.model = Some(new_model.to_string());
+            println!("Updated model: {}", new_model);
             changed = true;
         }
-    } else if loop_max.is_some() || loop_guard.is_some() || loop_delay.is_some() {
-        anyhow::bail!("--loop-max, --loop-guard, and --loop-delay require --add-loops-to");
-    }
 
-    // Remove loops_to edge
-    if let Some(target) = remove_loops_to {
-        if let Some(pos) = task.loops_to.iter().position(|e| e.target == target) {
-            task.loops_to.remove(pos);
-            println!("Removed loops_to: {}", target);
+        // Add skills
+        for skill in add_skill {
+            if !task.skills.contains(skill) {
+                task.skills.push(skill.clone());
+                println!("Added skill: {}", skill);
+                changed = true;
+            } else {
+                println!("Already has skill: {}", skill);
+            }
+        }
+
+        // Remove skills
+        for skill in remove_skill {
+            if let Some(pos) = task.skills.iter().position(|x| x == skill) {
+                task.skills.remove(pos);
+                println!("Removed skill: {}", skill);
+                changed = true;
+            } else {
+                println!("Does not have skill: {}", skill);
+            }
+        }
+
+        // Add loops_to edge
+        if let Some(target) = add_loops_to {
+            let max_iterations = loop_max.ok_or_else(|| {
+                anyhow::anyhow!("--loop-max is required when using --add-loops-to")
+            })?;
+            let guard = match loop_guard {
+                Some(expr) => Some(crate::commands::add::parse_guard_expr(expr)?),
+                None => None,
+            };
+            let delay = match loop_delay {
+                Some(d) => {
+                    parse_delay(d).ok_or_else(|| {
+                        anyhow::anyhow!("Invalid delay '{}'. Use format: 30s, 5m, 1h, 24h, 7d", d)
+                    })?;
+                    Some(d.to_string())
+                }
+                None => None,
+            };
+            // Check for duplicate target
+            if task.loops_to.iter().any(|e| e.target == target) {
+                println!("Already has loops_to edge targeting: {}", target);
+            } else {
+                task.loops_to.push(LoopEdge {
+                    target: target.to_string(),
+                    guard,
+                    max_iterations,
+                    delay,
+                });
+                println!(
+                    "Added loops_to: {} (max_iterations: {})",
+                    target, max_iterations
+                );
+                changed = true;
+            }
+        } else if loop_max.is_some() || loop_guard.is_some() || loop_delay.is_some() {
+            anyhow::bail!("--loop-max, --loop-guard, and --loop-delay require --add-loops-to");
+        }
+
+        // Remove loops_to edge
+        if let Some(target) = remove_loops_to {
+            if let Some(pos) = task.loops_to.iter().position(|e| e.target == target) {
+                task.loops_to.remove(pos);
+                println!("Removed loops_to: {}", target);
+                changed = true;
+            } else {
+                println!("No loops_to edge targeting: {}", target);
+            }
+        }
+
+        // Set loop_iteration directly
+        if let Some(iter) = loop_iteration {
+            task.loop_iteration = iter;
+            println!("Set loop_iteration: {}", iter);
             changed = true;
-        } else {
-            println!("No loops_to edge targeting: {}", target);
+        }
+    } // task borrow released here
+
+    // Maintain bidirectional consistency: update `blocks` on referenced tasks
+    let task_id_owned = task_id.to_string();
+    for dep in add_blocked_by {
+        if let Some(blocker) = graph.get_task_mut(dep)
+            && !blocker.blocks.contains(&task_id_owned)
+        {
+            blocker.blocks.push(task_id_owned.clone());
         }
     }
-
-    // Set loop_iteration directly
-    if let Some(iter) = loop_iteration {
-        task.loop_iteration = iter;
-        println!("Set loop_iteration: {}", iter);
-        changed = true;
+    for dep in remove_blocked_by {
+        if let Some(blocker) = graph.get_task_mut(dep) {
+            blocker.blocks.retain(|b| b != &task_id_owned);
+        }
     }
 
     // Save if changes were made
@@ -219,6 +254,59 @@ mod tests {
             Some("test-task"),
             Some("Original description"),
             &["dep1".to_string()],
+            None,
+            None,
+            None,
+            &["tag1".to_string()],
+            &["skill1".to_string()],
+            &[],
+            &[],
+            None,
+            Some("sonnet"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+
+        Ok(())
+    }
+
+    fn create_test_graph_with_two_tasks(dir: &Path) -> Result<()> {
+        fs::create_dir_all(dir)?;
+        let graph_path = graph_path(dir);
+        fs::write(&graph_path, "")?;
+
+        // Add two independent tasks (no initial dependency between them)
+        crate::commands::add::run(
+            dir,
+            "Blocker Task",
+            Some("blocker-task"),
+            None,
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+
+        crate::commands::add::run(
+            dir,
+            "Test Task",
+            Some("test-task"),
+            Some("Original description"),
+            &[],
             None,
             None,
             None,
@@ -582,5 +670,169 @@ mod tests {
             None,
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_self_blocking_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_graph(temp_dir.path()).unwrap();
+
+        let result = run(
+            temp_dir.path(),
+            "test-task",
+            None,
+            None,
+            &["test-task".to_string()],
+            &[],
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot block itself")
+        );
+    }
+
+    #[test]
+    fn test_self_loop_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_graph(temp_dir.path()).unwrap();
+
+        let result = run(
+            temp_dir.path(),
+            "test-task",
+            None,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            Some("test-task"),
+            Some(3),
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot loop to itself")
+        );
+    }
+
+    #[test]
+    fn test_add_blocked_by_updates_blocker_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_graph_with_two_tasks(temp_dir.path()).unwrap();
+
+        // Add a new blocked_by edge
+        let result = run(
+            temp_dir.path(),
+            "test-task",
+            None,
+            None,
+            &["blocker-task".to_string()],
+            &[],
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_ok());
+
+        let path = graph_path(temp_dir.path());
+        let graph = load_graph(&path).unwrap();
+
+        // Verify bidirectional consistency
+        let blocker = graph.get_task("blocker-task").unwrap();
+        assert!(
+            blocker.blocks.contains(&"test-task".to_string()),
+            "blocker-task.blocks should contain test-task"
+        );
+    }
+
+    #[test]
+    fn test_remove_blocked_by_updates_blocker_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_graph_with_two_tasks(temp_dir.path()).unwrap();
+
+        // First add the dependency, then remove it
+        run(
+            temp_dir.path(),
+            "test-task",
+            None,
+            None,
+            &["blocker-task".to_string()],
+            &[],
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Remove the blocked_by edge
+        let result = run(
+            temp_dir.path(),
+            "test-task",
+            None,
+            None,
+            &[],
+            &["blocker-task".to_string()],
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_ok());
+
+        let path = graph_path(temp_dir.path());
+        let graph = load_graph(&path).unwrap();
+
+        // Verify bidirectional consistency
+        let blocker = graph.get_task("blocker-task").unwrap();
+        assert!(
+            !blocker.blocks.contains(&"test-task".to_string()),
+            "blocker-task.blocks should NOT contain test-task after removal"
+        );
     }
 }
