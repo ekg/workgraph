@@ -30,11 +30,15 @@ pub fn run(workgraph_dir: &Path) -> Result<()> {
     let programmer = roles
         .iter()
         .find(|r| r.name == "Programmer")
-        .expect("Programmer starter role must exist");
+        .ok_or_else(|| {
+            anyhow::anyhow!("Programmer starter role missing from agency::starter_roles()")
+        })?;
     let careful = motivations
         .iter()
         .find(|m| m.name == "Careful")
-        .expect("Careful starter motivation must exist");
+        .ok_or_else(|| {
+            anyhow::anyhow!("Careful starter motivation missing from agency::starter_motivations()")
+        })?;
 
     let agent_id = agency::content_hash_agent(&programmer.id, &careful.id);
     let agent_path = agents_dir.join(format!("{}.yaml", agent_id));

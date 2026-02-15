@@ -42,7 +42,7 @@ pub fn run_auto(dir: &Path, id: &str) -> Result<()> {
 /// This checks agent processes registered in the service registry.
 pub fn run_check_agents(dir: &Path, threshold_minutes: u64, json: bool) -> Result<()> {
     let registry = AgentRegistry::load(dir)?;
-    let threshold_secs = (threshold_minutes * 60) as i64;
+    let threshold_secs = threshold_minutes.saturating_mul(60) as i64;
 
     let mut stale_agents = Vec::new();
     let mut active_agents = Vec::new();

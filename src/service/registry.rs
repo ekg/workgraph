@@ -278,7 +278,7 @@ impl AgentRegistry {
         output_file: &str,
     ) -> String {
         let agent_id = format!("agent-{}", self.next_agent_id);
-        self.next_agent_id += 1;
+        self.next_agent_id = self.next_agent_id.saturating_add(1);
 
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -899,5 +899,17 @@ mod tests {
         assert_eq!(agent.pid, 54321);
         assert_eq!(agent.task_id, "implement-feature");
         assert_eq!(agent.status, AgentStatus::Working);
+    }
+
+    #[test]
+    fn test_agent_id_overflow_saturates() {
+        let mut registry = AgentRegistry::new();
+        registry.next_agent_id = u32::MAX;
+
+        let id = registry.register_agent(111, "task-1", "claude", "/tmp/1.log");
+        assert_eq!(id, format!("agent-{}", u32::MAX));
+
+        // Should saturate at MAX, not wrap to 0
+        assert_eq!(registry.next_agent_id, u32::MAX);
     }
 }

@@ -342,7 +342,9 @@ exit $EXIT_CODE
 
     // Claim the task BEFORE spawning the process to prevent race conditions
     // where two concurrent spawns both pass the status check.
-    let task = graph.get_task_mut(task_id).unwrap();
+    let task = graph
+        .get_task_mut(task_id)
+        .ok_or_else(|| anyhow::anyhow!("Task '{}' disappeared from graph", task_id))?;
     task.status = Status::InProgress;
     task.started_at = Some(Utc::now().to_rfc3339());
     task.assigned = Some(temp_agent_id.clone());

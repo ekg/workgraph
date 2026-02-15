@@ -42,7 +42,9 @@ pub fn run(dir: &Path, id: &str) -> Result<()> {
     }
 
     // Re-acquire mutable reference after immutable borrow
-    let task = graph.get_task_mut(id).unwrap();
+    let task = graph
+        .get_task_mut(id)
+        .ok_or_else(|| anyhow::anyhow!("Task '{}' disappeared from graph", id))?;
 
     task.status = Status::Done;
     task.completed_at = Some(Utc::now().to_rfc3339());

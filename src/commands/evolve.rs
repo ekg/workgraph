@@ -381,14 +381,14 @@ pub fn run(
                 // was just created in the same batch).
                 if matches!(
                     op.op.as_str(),
-                    "create_role" | "modify_role" | "crossover_role"
+                    "create_role" | "modify_role" | "retire_role"
                 ) && let Ok(updated) = agency::load_all_roles(&roles_dir)
                 {
                     roles = updated;
                 }
                 if matches!(
                     op.op.as_str(),
-                    "create_motivation" | "modify_motivation" | "crossover_motivation"
+                    "create_motivation" | "modify_motivation" | "retire_motivation"
                 ) && let Ok(updated) = agency::load_all_motivations(&motivations_dir)
                 {
                     motivations = updated;

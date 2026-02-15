@@ -163,7 +163,10 @@ pub fn save_graph<P: AsRef<Path>>(graph: &WorkGraph, path: P) -> Result<(), Pars
         {
             use std::os::unix::io::AsRawFd;
             // fsync to ensure data is on disk before rename
-            unsafe { libc::fsync(file.as_raw_fd()) };
+            let rc = unsafe { libc::fsync(file.as_raw_fd()) };
+            if rc != 0 {
+                return Err(ParseError::Io(std::io::Error::last_os_error()));
+            }
         }
 
         Ok(())

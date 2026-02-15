@@ -42,7 +42,7 @@ pub struct DetectionResult {
 pub fn run_check(dir: &Path, threshold_minutes: Option<u64>, json: bool) -> Result<()> {
     let config = Config::load_or_default(dir);
     let threshold_mins = threshold_minutes.unwrap_or(config.agent.heartbeat_timeout);
-    let threshold_secs = (threshold_mins * 60) as i64;
+    let threshold_secs = threshold_mins.saturating_mul(60) as i64;
 
     let registry = AgentRegistry::load(dir)?;
     let dead_agents = registry.find_dead_agents(threshold_secs);
@@ -101,7 +101,7 @@ pub fn run_cleanup(
 
     let config = Config::load_or_default(dir);
     let threshold_mins = threshold_minutes.unwrap_or(config.agent.heartbeat_timeout);
-    let threshold_secs = (threshold_mins * 60) as i64;
+    let threshold_secs = threshold_mins.saturating_mul(60) as i64;
 
     // Load registry with lock
     let mut locked_registry = AgentRegistry::load_locked(dir)?;

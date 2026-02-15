@@ -492,7 +492,7 @@ pub fn center_layers(layout: &mut DagLayout) {
 
     // Group nodes by layer
     let max_layer = layout.nodes.iter().map(|n| n.layer).max().unwrap_or(0);
-    let mut layer_extents: Vec<(usize, usize)> = vec![(usize::MAX, 0); max_layer + 1];
+    let mut layer_extents: Vec<(usize, usize)> = vec![(usize::MAX, 0); max_layer.saturating_add(1)];
 
     for node in &layout.nodes {
         let layer = node.layer;
@@ -524,8 +524,14 @@ pub fn center_layers(layout: &mut DagLayout) {
     // Recompute total width, adding extra margin for back-edge/loop-edge routing
     let has_side_edges = layout.has_cycles || !layout.loop_edges.is_empty();
     let extra_margin = if has_side_edges { BACK_EDGE_MARGIN } else { 0 };
-    layout.width =
-        layout.nodes.iter().map(|n| n.x + n.w).max().unwrap_or(0) + LEFT_MARGIN + extra_margin;
+    layout.width = layout
+        .nodes
+        .iter()
+        .map(|n| n.x.saturating_add(n.w))
+        .max()
+        .unwrap_or(0)
+        .saturating_add(LEFT_MARGIN)
+        .saturating_add(extra_margin);
 
     // Rebuild id_to_idx after potential reordering
     layout.id_to_idx = layout
@@ -605,7 +611,12 @@ pub fn reroute_edges(layout: &mut DagLayout, graph: &WorkGraph) {
 
     // Route back-edges (cycles) - these go upward along the right side
     if !layout.back_edges.is_empty() {
-        let max_x = layout.nodes.iter().map(|n| n.x + n.w).max().unwrap_or(0);
+        let max_x = layout
+            .nodes
+            .iter()
+            .map(|n| n.x.saturating_add(n.w))
+            .max()
+            .unwrap_or(0);
 
         // Route each back-edge along the right margin going upward
         let mut new_back_edges: Vec<BackEdge> = Vec::new();
@@ -620,7 +631,7 @@ pub fn reroute_edges(layout: &mut DagLayout, graph: &WorkGraph) {
 
             // Back-edge goes from bottom of 'from' node upward to top of 'to' node
             // Route along the right side of the layout
-            let route_x = max_x + 1 + i; // Offset each back-edge slightly for multiple cycles
+            let route_x = max_x.saturating_add(1).saturating_add(i); // Offset each back-edge slightly for multiple cycles
 
             // Start from bottom-right of the source node
             let from_x = from_node.x + from_node.w - 1;
@@ -650,7 +661,12 @@ pub fn reroute_edges(layout: &mut DagLayout, graph: &WorkGraph) {
 
     // Route loop edges (loops_to) — these go along the right side, offset from back-edges
     if !layout.loop_edges.is_empty() {
-        let max_x = layout.nodes.iter().map(|n| n.x + n.w).max().unwrap_or(0);
+        let max_x = layout
+            .nodes
+            .iter()
+            .map(|n| n.x.saturating_add(n.w))
+            .max()
+            .unwrap_or(0);
 
         // Offset loop edges after any back-edges to avoid overlap
         let back_edge_count = layout.back_edges.len();
@@ -666,7 +682,10 @@ pub fn reroute_edges(layout: &mut DagLayout, graph: &WorkGraph) {
             };
 
             // Route along the right side, offset from back-edges
-            let route_x = max_x + 1 + back_edge_count + i;
+            let route_x = max_x
+                .saturating_add(1)
+                .saturating_add(back_edge_count)
+                .saturating_add(i);
 
             // Determine routing direction: source → right margin → target
             let from_x = from_node.x + from_node.w - 1;
@@ -1289,7 +1308,7 @@ fn draw_node(buf: &mut [Vec<Cell>], node: &LayoutNode, buf_width: usize, buf_hei
         }
     }
     // Fill remaining with spaces
-    for cx in (x + 1 + content.len())..(x + w - 1) {
+    for cx in (x + 1 + content.chars().count())..(x + w - 1) {
         set_cell(buf, cx, content_y, ' ', style);
     }
 
@@ -1303,7 +1322,7 @@ fn draw_node(buf: &mut [Vec<Cell>], node: &LayoutNode, buf_width: usize, buf_hei
 }
 
 fn set_cell(buf: &mut [Vec<Cell>], x: usize, y: usize, ch: char, style: CellStyle) {
-    if y < buf.len() && x < buf[0].len() {
+    if y < buf.len() && x < buf.get(y).map_or(0, |row| row.len()) {
         buf[y][x] = Cell { ch, style };
     }
 }
@@ -1816,6 +1835,49 @@ mod tests {
         let edges = vec![(0, 0)];
         let back_edges = detect_back_edges(1, &edges);
         assert_eq!(back_edges.len(), 1, "Should detect self-loop as back-edge");
+    }
+
+    #[test]
+    fn test_set_cell_empty_buffer_no_panic() {
+        let mut buf: Vec<Vec<Cell>> = vec![];
+        // Should not panic on empty buffer
+        set_cell(&mut buf, 0, 0, 'x', CellStyle::Empty);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_render_unicode_title_no_gap() {
+        // Unicode titles should render correctly without gaps
+        let mut graph = WorkGraph::new();
+        let mut task = make_task("uni", "Task ✓ 完了", vec![]);
+        task.status = Status::Done;
+        add_task(&mut graph, task);
+
+        let critical = HashSet::new();
+        let agents = HashMap::new();
+
+        let mut layout = DagLayout::compute(&graph, &critical, &agents);
+        center_layers(&mut layout);
+        reroute_edges(&mut layout, &graph);
+
+        // Should render without panic
+        let buf = render_to_buffer(&layout);
+        assert!(!buf.is_empty());
+
+        // Verify no default '\0' chars remain in the content area
+        // (which would indicate gap from byte vs char mismatch)
+        let text: String = buf
+            .iter()
+            .map(|row| {
+                let line: String = row.iter().map(|c| c.ch).collect();
+                line.trim_end().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !text.contains('\0'),
+            "Buffer should not contain null chars from byte/char mismatch"
+        );
     }
 
     #[test]
