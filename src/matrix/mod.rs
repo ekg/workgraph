@@ -557,8 +557,8 @@ fn uuid_v4_simple() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let random = std::process::id() as u128 ^ now;
     format!("{:032x}", random)
 }

@@ -1213,12 +1213,37 @@ fn apply_modify_motivation(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("modify_motivation requires target_id"))?;
 
-    let parent = existing_motivations
-        .iter()
-        .find(|m| m.id == target_id)
-        .ok_or_else(|| anyhow::anyhow!("Parent motivation '{}' not found", target_id))?;
+    // Support crossover: target_id may be "parent-a,parent-b"
+    let parent_ids: Vec<&str> = target_id
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
 
-    let lineage = Lineage::mutation(target_id, parent.lineage.generation, run_id);
+    if parent_ids.is_empty() {
+        anyhow::bail!("modify_motivation target_id produced zero valid parent IDs after parsing");
+    }
+
+    let lineage = if parent_ids.len() == 1 {
+        let parent = existing_motivations
+            .iter()
+            .find(|m| m.id == parent_ids[0])
+            .ok_or_else(|| anyhow::anyhow!("Parent motivation '{}' not found", parent_ids[0]))?;
+        Lineage::mutation(parent_ids[0], parent.lineage.generation, run_id)
+    } else {
+        for pid in &parent_ids {
+            if !existing_motivations.iter().any(|m| m.id == *pid) {
+                anyhow::bail!("Parent motivation '{}' not found for crossover", pid);
+            }
+        }
+        let max_gen = parent_ids
+            .iter()
+            .filter_map(|pid| existing_motivations.iter().find(|m| m.id == *pid))
+            .map(|m| m.lineage.generation)
+            .max()
+            .unwrap_or(0);
+        Lineage::crossover(&parent_ids, max_gen, run_id)
+    };
 
     let description = op.description.clone().unwrap_or_default();
     let acceptable = op.acceptable_tradeoffs.clone().unwrap_or_default();
@@ -2098,6 +2123,135 @@ Let me know if you'd like me to adjust anything."#;
         let result = apply_modify_motivation(&op, &[], "test-run", &motivations_dir);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_apply_modify_motivation_crossover() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let motivations_dir = temp_dir.path().join("motivations");
+        fs::create_dir_all(&motivations_dir).unwrap();
+
+        let parent_a = Motivation {
+            id: "mot-careful".into(),
+            name: "Careful".into(),
+            description: "Prioritizes reliability".into(),
+            acceptable_tradeoffs: vec!["Slow".into()],
+            unacceptable_tradeoffs: vec!["Untested".into()],
+            performance: PerformanceRecord {
+                task_count: 5,
+                avg_score: Some(0.7),
+                evaluations: vec![],
+            },
+            lineage: Lineage {
+                parent_ids: vec![],
+                generation: 2,
+                created_by: "run-1".into(),
+                created_at: chrono::Utc::now(),
+            },
+        };
+
+        let parent_b = Motivation {
+            id: "mot-fast".into(),
+            name: "Fast".into(),
+            description: "Prioritizes speed".into(),
+            acceptable_tradeoffs: vec!["Verbose".into()],
+            unacceptable_tradeoffs: vec!["Unreliable".into()],
+            performance: PerformanceRecord {
+                task_count: 3,
+                avg_score: Some(0.8),
+                evaluations: vec![],
+            },
+            lineage: Lineage {
+                parent_ids: vec![],
+                generation: 1,
+                created_by: "run-0".into(),
+                created_at: chrono::Utc::now(),
+            },
+        };
+
+        let op = EvolverOperation {
+            op: "modify_motivation".into(),
+            target_id: Some("mot-careful,mot-fast".into()),
+            new_id: None,
+            name: Some("Balanced".into()),
+            description: Some("Balance of speed and reliability".into()),
+            skills: None,
+            desired_outcome: None,
+            acceptable_tradeoffs: Some(vec!["Moderate slowness".into()]),
+            unacceptable_tradeoffs: Some(vec!["Untested".into(), "Unreliable".into()]),
+            rationale: Some("Crossover of careful and fast".into()),
+        };
+
+        let result =
+            apply_modify_motivation(&op, &[parent_a, parent_b], "test-run", &motivations_dir)
+                .unwrap();
+        assert_eq!(result["status"], "applied");
+
+        // Generation should be max(2, 1) + 1 = 3
+        assert_eq!(result["generation"], 3);
+
+        // Parent IDs should include both parents
+        let parent_ids: Vec<String> = result["parent_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(parent_ids, vec!["mot-careful", "mot-fast"]);
+
+        // Verify the content-hash ID
+        let new_id = result["new_id"].as_str().unwrap();
+        assert_eq!(new_id.len(), 64);
+
+        // Load and verify
+        let mot =
+            agency::load_motivation(&motivations_dir.join(format!("{}.yaml", new_id))).unwrap();
+        assert_eq!(mot.name, "Balanced");
+        assert_eq!(mot.lineage.generation, 3);
+        assert_eq!(mot.lineage.parent_ids, vec!["mot-careful", "mot-fast"]);
+    }
+
+    #[test]
+    fn test_apply_modify_motivation_crossover_missing_parent_fails() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let motivations_dir = temp_dir.path().join("motivations");
+        fs::create_dir_all(&motivations_dir).unwrap();
+
+        let parent_a = Motivation {
+            id: "mot-a".into(),
+            name: "A".into(),
+            description: "".into(),
+            acceptable_tradeoffs: vec![],
+            unacceptable_tradeoffs: vec![],
+            performance: PerformanceRecord {
+                task_count: 0,
+                avg_score: None,
+                evaluations: vec![],
+            },
+            lineage: Lineage::default(),
+        };
+
+        let op = EvolverOperation {
+            op: "modify_motivation".into(),
+            target_id: Some("mot-a,nonexistent".into()),
+            new_id: None,
+            name: None,
+            description: None,
+            skills: None,
+            desired_outcome: None,
+            acceptable_tradeoffs: None,
+            unacceptable_tradeoffs: None,
+            rationale: None,
+        };
+
+        let result = apply_modify_motivation(&op, &[parent_a], "test-run", &motivations_dir);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not found for crossover")
+        );
     }
 
     #[test]

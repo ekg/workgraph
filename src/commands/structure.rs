@@ -187,7 +187,10 @@ fn output_json(entry_points: &[&str], dead_ends: &[DeadEndInfo], high_impact: &[
         "high_impact_roots": high_impact_json
     });
 
-    println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => println!("{}", json),
+        Err(e) => eprintln!("Failed to serialize structure output: {}", e),
+    }
 }
 
 fn output_text(entry_points: &[&str], dead_ends: &[DeadEndInfo], high_impact: &[(&str, usize)]) {

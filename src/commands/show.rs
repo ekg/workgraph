@@ -200,8 +200,8 @@ fn print_human_readable(details: &TaskDetails) {
             None => format!("Retry count: {}", details.retry_count),
         };
         println!("{}", retry_info);
-    } else if details.max_retries.is_some() {
-        println!("Max retries: {}", details.max_retries.unwrap());
+    } else if let Some(max) = details.max_retries {
+        println!("Max retries: {}", max);
     }
 
     // Description

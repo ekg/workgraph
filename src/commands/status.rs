@@ -234,7 +234,11 @@ fn gather_task_summary(dir: &Path) -> Result<TaskSummaryInfo> {
     let mut done_today = 0;
     let mut done_total = 0;
 
-    let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let today_start = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight is always valid")
+        .and_utc();
 
     for task in graph.tasks() {
         match task.status {

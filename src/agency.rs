@@ -697,6 +697,7 @@ pub fn load_role(path: &Path) -> Result<Role, AgencyError> {
 
 /// Save a role as `<role.id>.yaml` inside `dir`.
 pub fn save_role(role: &Role, dir: &Path) -> Result<PathBuf, AgencyError> {
+    fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.yaml", role.id));
     let yaml = serde_yaml::to_string(role)?;
     fs::write(&path, yaml)?;
@@ -731,6 +732,7 @@ pub fn load_motivation(path: &Path) -> Result<Motivation, AgencyError> {
 
 /// Save a motivation as `<motivation.id>.yaml` inside `dir`.
 pub fn save_motivation(motivation: &Motivation, dir: &Path) -> Result<PathBuf, AgencyError> {
+    fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.yaml", motivation.id));
     let yaml = serde_yaml::to_string(motivation)?;
     fs::write(&path, yaml)?;
@@ -765,6 +767,7 @@ pub fn load_evaluation(path: &Path) -> Result<Evaluation, AgencyError> {
 
 /// Save an evaluation as `<evaluation.id>.json` inside `dir`.
 pub fn save_evaluation(evaluation: &Evaluation, dir: &Path) -> Result<PathBuf, AgencyError> {
+    fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.json", evaluation.id));
     let json = serde_json::to_string_pretty(evaluation)?;
     fs::write(&path, json)?;

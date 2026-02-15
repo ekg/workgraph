@@ -224,8 +224,8 @@ fn generate_id(title: &str, graph: &workgraph::WorkGraph) -> String {
         "task-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     )
 }
 

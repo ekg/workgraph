@@ -667,8 +667,8 @@ fn generate_ascii(
     let mut component_list: Vec<Vec<&str>> = components.into_values().collect();
     component_list.retain(|c| !c.is_empty());
     component_list.sort_by(|a, b| {
-        let a_min = a.iter().min().expect("non-empty after retain");
-        let b_min = b.iter().min().expect("non-empty after retain");
+        let a_min = a.iter().min().unwrap_or(&"");
+        let b_min = b.iter().min().unwrap_or(&"");
         a_min.cmp(b_min)
     });
 
@@ -767,8 +767,9 @@ fn generate_ascii(
                         ));
                         if use_color {
                             // Append reset to the last line
-                            let last = lines.last_mut().unwrap();
-                            last.push_str(reset);
+                            if let Some(last) = lines.last_mut() {
+                                last.push_str(reset);
+                            }
                         }
                     }
                 }

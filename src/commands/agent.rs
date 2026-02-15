@@ -363,7 +363,7 @@ fn run_iteration(dir: &Path, actor_id: &str, json: bool) -> Result<IterationResu
             score += 5;
         }
 
-        if best_task.is_none() || score > best_task.unwrap().1 {
+        if best_task.as_ref().is_none_or(|(_, s)| score > *s) {
             best_task = Some((task, score));
         }
     }
@@ -375,7 +375,6 @@ fn run_iteration(dir: &Path, actor_id: &str, json: bool) -> Result<IterationResu
 
     let task_id = task.id.clone();
     let task_title = task.title.clone();
-    let has_exec = task.exec.is_some();
     let exec_cmd = task.exec.clone();
 
     if !json {
@@ -387,8 +386,7 @@ fn run_iteration(dir: &Path, actor_id: &str, json: bool) -> Result<IterationResu
     claim_task(dir, &task_id, actor_id)?;
 
     // Execute if has exec command
-    if has_exec {
-        let exec_cmd = exec_cmd.unwrap();
+    if let Some(exec_cmd) = exec_cmd {
         if !json {
             println!("  Executing: {}", exec_cmd);
         }

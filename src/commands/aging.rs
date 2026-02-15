@@ -394,7 +394,10 @@ fn output_json(
         tasks_with_unknown_age: unknown_age_count,
     };
 
-    println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => println!("{}", json),
+        Err(e) => eprintln!("Failed to serialize aging output: {}", e),
+    }
 }
 
 #[cfg(test)]

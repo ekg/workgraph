@@ -1581,7 +1581,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let command = cli.command.unwrap();
+    let command = match cli.command {
+        Some(c) => c,
+        None => return Ok(()),
+    };
 
     // Warn if --json is passed to a command that doesn't support it
     if cli.json && !supports_json(&command) {
@@ -1756,15 +1759,10 @@ fn main() -> Result<()> {
             actor,
             list,
         } => {
-            if list || message.is_none() {
-                commands::log::run_list(&workgraph_dir, &id, cli.json)
+            if let (false, Some(msg)) = (list, &message) {
+                commands::log::run_add(&workgraph_dir, &id, msg, actor.as_deref())
             } else {
-                commands::log::run_add(
-                    &workgraph_dir,
-                    &id,
-                    message.as_deref().unwrap(),
-                    actor.as_deref(),
-                )
+                commands::log::run_list(&workgraph_dir, &id, cli.json)
             }
         }
         Commands::Resource { command } => match command {
@@ -1854,10 +1852,10 @@ fn main() -> Result<()> {
             threshold,
             ..
         } => {
-            if check || agent.is_none() {
-                commands::heartbeat::run_check_agents(&workgraph_dir, threshold, cli.json)
+            if let (false, Some(a)) = (check, &agent) {
+                commands::heartbeat::run_auto(&workgraph_dir, a)
             } else {
-                commands::heartbeat::run_auto(&workgraph_dir, agent.as_deref().unwrap())
+                commands::heartbeat::run_check_agents(&workgraph_dir, threshold, cli.json)
             }
         }
         Commands::Artifact { task, path, remove } => {

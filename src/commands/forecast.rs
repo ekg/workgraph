@@ -382,17 +382,20 @@ fn find_longest_path_from(
     // Get dependents
     let dependents = reverse_index.get(start_id);
 
-    if dependents.is_none() || dependents.unwrap().is_empty() {
-        // No dependents, this is the end of the path
-        visited.remove(start_id);
-        return (vec![start_id.to_string()], my_hours);
-    }
+    let deps = match dependents {
+        Some(d) if !d.is_empty() => d,
+        _ => {
+            // No dependents, this is the end of the path
+            visited.remove(start_id);
+            return (vec![start_id.to_string()], my_hours);
+        }
+    };
 
     // Find the longest path among all dependents
     let mut best_path: Vec<String> = Vec::new();
     let mut best_hours: f64 = 0.0;
 
-    for dep_id in dependents.unwrap() {
+    for dep_id in deps {
         let (path, hours) = find_longest_path_from(graph, reverse_index, dep_id, visited);
         if hours > best_hours || (hours == best_hours && path.len() > best_path.len()) {
             best_path = path;
@@ -471,7 +474,7 @@ fn print_human_output(forecast: &ForecastOutput) {
         } else {
             // Truncate long paths
             let first_three: Vec<_> = critical.path.iter().take(3).cloned().collect();
-            let last = critical.path.last().unwrap();
+            let last = &critical.path[critical.path.len() - 1];
             format!("{} -> ... -> {}", first_three.join(" -> "), last)
         };
         println!(

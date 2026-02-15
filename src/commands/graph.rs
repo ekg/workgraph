@@ -44,7 +44,10 @@ fn load_archive(archive_path: &Path) -> Result<Vec<Task>> {
 fn parse_date(s: &str) -> Result<DateTime<Utc>> {
     let date = NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .with_context(|| format!("Invalid date format '{}', expected YYYY-MM-DD", s))?;
-    Ok(date.and_hms_opt(0, 0, 0).unwrap().and_utc())
+    Ok(date
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight is always valid")
+        .and_utc())
 }
 
 /// Check if a task falls within the date range

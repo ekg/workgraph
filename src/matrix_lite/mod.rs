@@ -325,8 +325,8 @@ impl MatrixClient {
             "wg_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
         );
 
         let url = format!(
@@ -559,7 +559,10 @@ pub async fn send_notification(workgraph_dir: &Path, message: &str) -> Result<()
         );
     }
 
-    let room_id = config.default_room.as_ref().unwrap();
+    let room_id = config
+        .default_room
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("default_room not configured"))?;
     let client = MatrixClient::new(workgraph_dir, &config).await?;
     client.send_message(room_id, message).await?;
 

@@ -238,7 +238,9 @@ fn spawn_agent_inner(
             format!(
                 "{} -c {}",
                 shell_escape(&settings.command),
-                shell_escape(task_exec.as_ref().unwrap())
+                shell_escape(task_exec.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("shell executor requires task exec command")
+                })?)
             )
         }
         _ => {
