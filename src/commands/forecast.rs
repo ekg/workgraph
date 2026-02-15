@@ -132,7 +132,7 @@ fn calculate_remaining_work(graph: &WorkGraph) -> RemainingWork {
     let blocked_ids = find_blocked_task_ids(graph);
 
     for task in graph.tasks() {
-        if task.status == Status::Done {
+        if task.status.is_terminal() {
             continue;
         }
 
@@ -182,14 +182,14 @@ fn find_blocked_task_ids(graph: &WorkGraph) -> HashSet<String> {
     let mut blocked_ids = HashSet::new();
 
     for task in graph.tasks() {
-        if task.status == Status::Done {
+        if task.status.is_terminal() {
             continue;
         }
 
-        // Check if any blocker is not done
+        // Check if any blocker is still active (not terminal)
         for blocker_id in &task.blocked_by {
             if let Some(blocker) = graph.get_task(blocker_id)
-                && blocker.status != Status::Done
+                && !blocker.status.is_terminal()
             {
                 blocked_ids.insert(task.id.clone());
                 break;
@@ -264,8 +264,8 @@ fn find_key_blockers(graph: &WorkGraph) -> Vec<Blocker> {
     let mut blockers: Vec<Blocker> = Vec::new();
 
     for task in graph.tasks() {
-        // Skip done tasks
-        if task.status == Status::Done {
+        // Skip terminal tasks (done, failed, abandoned)
+        if task.status.is_terminal() {
             continue;
         }
 
@@ -309,15 +309,15 @@ fn find_critical_path(graph: &WorkGraph) -> Option<CriticalPath> {
     let mut entry_points: Vec<&str> = Vec::new();
 
     for task in graph.tasks() {
-        if task.status == Status::Done {
+        if task.status.is_terminal() {
             continue;
         }
 
-        // Check if all blockers are done (or has no blockers)
+        // Check if all blockers are resolved (terminal or nonexistent)
         let all_blockers_done = task.blocked_by.iter().all(|bid| {
             graph
                 .get_task(bid)
-                .map(|t| t.status == Status::Done)
+                .map(|t| t.status.is_terminal())
                 .unwrap_or(true)
         });
 
@@ -364,7 +364,7 @@ fn find_longest_path_from(
     visited: &mut HashSet<String>,
 ) -> (Vec<String>, f64) {
     let task = match graph.get_task(start_id) {
-        Some(t) if t.status != Status::Done => t,
+        Some(t) if !t.status.is_terminal() => t,
         _ => return (vec![], 0.0),
     };
 

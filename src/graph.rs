@@ -111,6 +111,15 @@ impl<'de> serde::Deserialize<'de> for Status {
     }
 }
 
+impl Status {
+    /// Whether this status is terminal — the task will not progress further
+    /// without explicit intervention (retry, reopen, etc.).
+    /// Terminal statuses should not block dependent tasks.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Status::Done | Status::Failed | Status::Abandoned)
+    }
+}
+
 /// A task node.
 ///
 /// A task in the workgraph with dependencies, status, and execution metadata.
@@ -575,6 +584,7 @@ pub fn evaluate_loop_edges(graph: &mut WorkGraph, source_id: &str) -> Vec<String
                 mid_task.assigned = None;
                 mid_task.started_at = None;
                 mid_task.completed_at = None;
+                mid_task.loop_iteration = new_iteration;
 
                 mid_task.log.push(LogEntry {
                     timestamp: Utc::now().to_rfc3339(),
@@ -619,8 +629,12 @@ pub fn evaluate_loop_edges(graph: &mut WorkGraph, source_id: &str) -> Vec<String
 /// and `to` (the loop source). These are tasks that have `from` as a transitive
 /// blocker and are themselves transitive blockers of `to`.
 ///
-/// Uses BFS forward from `from` along the reverse dependency graph (tasks blocked
-/// by `from`, tasks blocked by those, etc.) and stops at `to`.
+///
+/// Uses two passes:
+///   1. Forward BFS from `from` along dependents to find all tasks reachable from `from`.
+///   2. Backward BFS from `to` along blocked_by to find all tasks that can reach `to`.
+///
+/// The intersection (excluding `from` and `to` themselves) gives the true intermediates.
 fn find_intermediate_tasks(graph: &WorkGraph, from: &str, to: &str) -> Vec<String> {
     use std::collections::{HashSet, VecDeque};
 
@@ -635,38 +649,56 @@ fn find_intermediate_tasks(graph: &WorkGraph, from: &str, to: &str) -> Vec<Strin
         }
     }
 
-    // BFS from `from` following dependents, collecting tasks until we reach `to`
-    let mut visited = HashSet::new();
+    // Pass 1: Forward BFS from `from` — find all tasks reachable via dependents
+    let mut forward_reachable = HashSet::new();
     let mut queue = VecDeque::new();
-    let mut result = Vec::new();
-
-    // Start with direct dependents of `from`
     if let Some(deps) = dependents.get(from) {
         for dep in deps {
-            if !visited.contains(dep.as_str()) {
-                visited.insert(dep.clone());
+            if forward_reachable.insert(dep.clone()) {
                 queue.push_back(dep.clone());
             }
         }
     }
-
     while let Some(current) = queue.pop_front() {
         if current == to {
-            continue; // Don't include the source itself, and don't traverse past it
+            continue; // Don't traverse past the source
         }
-        result.push(current.clone());
-
         if let Some(deps) = dependents.get(&current) {
             for dep in deps {
-                if !visited.contains(dep.as_str()) {
-                    visited.insert(dep.clone());
+                if forward_reachable.insert(dep.clone()) {
                     queue.push_back(dep.clone());
                 }
             }
         }
     }
 
-    result
+    // Pass 2: Backward BFS from `to` — find all tasks that transitively block `to`
+    let mut backward_reachable = HashSet::new();
+    if let Some(task) = graph.get_task(to) {
+        for blocker in &task.blocked_by {
+            if backward_reachable.insert(blocker.clone()) {
+                queue.push_back(blocker.clone());
+            }
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        if current == from {
+            continue; // Don't traverse past the target
+        }
+        if let Some(task) = graph.get_task(&current) {
+            for blocker in &task.blocked_by {
+                if backward_reachable.insert(blocker.clone()) {
+                    queue.push_back(blocker.clone());
+                }
+            }
+        }
+    }
+
+    // Intersection: tasks reachable from `from` AND that can reach `to`
+    forward_reachable
+        .into_iter()
+        .filter(|id| id != from && id != to && backward_reachable.contains(id))
+        .collect()
 }
 
 #[cfg(test)]
@@ -705,6 +737,16 @@ mod tests {
             loop_iteration: 0,
             ready_after: None,
         }
+    }
+
+    #[test]
+    fn test_status_is_terminal() {
+        assert!(!Status::Open.is_terminal());
+        assert!(!Status::InProgress.is_terminal());
+        assert!(!Status::Blocked.is_terminal());
+        assert!(Status::Done.is_terminal());
+        assert!(Status::Failed.is_terminal());
+        assert!(Status::Abandoned.is_terminal());
     }
 
     #[test]
@@ -1115,10 +1157,10 @@ mod tests {
         graph.add_node(Node::Task(a));
         graph.add_node(Node::Task(b));
 
-        // Looking for path from a to "missing" — b is reachable but "missing" is never found
+        // Looking for path from a to "missing" — b is reachable from a but not on a
+        // path to "missing" (which doesn't exist), so it should NOT be returned.
         let result = find_intermediate_tasks(&graph, "a", "missing");
-        // b is traversed and collected as an intermediate (never reaches "missing" to stop)
-        assert_eq!(result, vec!["b"]);
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -1232,5 +1274,84 @@ mod tests {
         assert!(result.contains(&"b".to_string()));
         assert!(result.contains(&"c".to_string()));
         assert!(result.contains(&"d".to_string()));
+    }
+
+    #[test]
+    fn test_find_intermediate_excludes_unrelated_branch() {
+        // Graph: a -> b -> c (loop from c back to a)
+        //        a -> x -> y (branch NOT on path to c)
+        // Only b should be returned, not x or y
+        let mut graph = WorkGraph::new();
+
+        let a = make_task("a", "A");
+        let mut b = make_task("b", "B");
+        b.blocked_by = vec!["a".to_string()];
+        let mut c = make_task("c", "C");
+        c.blocked_by = vec!["b".to_string()];
+        let mut x = make_task("x", "X");
+        x.blocked_by = vec!["a".to_string()];
+        let mut y = make_task("y", "Y");
+        y.blocked_by = vec!["x".to_string()];
+
+        graph.add_node(Node::Task(a));
+        graph.add_node(Node::Task(b));
+        graph.add_node(Node::Task(c));
+        graph.add_node(Node::Task(x));
+        graph.add_node(Node::Task(y));
+
+        // Loop from c back to a — intermediates should only be b
+        let result = find_intermediate_tasks(&graph, "a", "c");
+        assert_eq!(result, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn test_find_intermediate_loop_iteration_updated() {
+        // Chain: tgt -> mid -> src (blocked_by direction)
+        // Loop: src loops_to tgt
+        // When src completes, tgt gets re-opened, mid (between tgt and src)
+        // should also get re-opened with the correct loop_iteration.
+        let mut graph = WorkGraph::new();
+
+        let mut tgt = make_task("tgt", "Target");
+        tgt.status = Status::Done;
+
+        let mut mid = make_task("mid", "Middle");
+        mid.blocked_by = vec!["tgt".to_string()];
+        mid.status = Status::Done;
+
+        let mut src = make_task("src", "Source");
+        src.blocked_by = vec!["mid".to_string()];
+        src.status = Status::Done;
+        src.loops_to.push(LoopEdge {
+            target: "tgt".to_string(),
+            guard: None,
+            max_iterations: 3,
+            delay: None,
+        });
+
+        graph.add_node(Node::Task(tgt));
+        graph.add_node(Node::Task(mid));
+        graph.add_node(Node::Task(src));
+
+        let reactivated = evaluate_loop_edges(&mut graph, "src");
+
+        // All three should be re-opened
+        assert!(reactivated.contains(&"tgt".to_string()));
+        assert!(reactivated.contains(&"mid".to_string()));
+        assert!(reactivated.contains(&"src".to_string()));
+
+        // Mid should have the same loop_iteration as src and tgt (iteration 1)
+        let mid = graph.get_task("mid").unwrap();
+        assert_eq!(
+            mid.loop_iteration, 1,
+            "intermediate task should have updated loop_iteration"
+        );
+        assert_eq!(mid.status, Status::Open);
+
+        let src = graph.get_task("src").unwrap();
+        assert_eq!(src.loop_iteration, 1);
+
+        let tgt = graph.get_task("tgt").unwrap();
+        assert_eq!(tgt.loop_iteration, 1);
     }
 }

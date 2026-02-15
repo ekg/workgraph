@@ -133,8 +133,8 @@ pub fn run(
     };
 
     // Load all agency data
-    let roles = agency::load_all_roles(&roles_dir).context("Failed to load roles")?;
-    let motivations =
+    let mut roles = agency::load_all_roles(&roles_dir).context("Failed to load roles")?;
+    let mut motivations =
         agency::load_all_motivations(&motivations_dir).context("Failed to load motivations")?;
     let all_evaluations =
         agency::load_all_evaluations(&evals_dir).context("Failed to load evaluations")?;
@@ -371,6 +371,24 @@ pub fn run(
                     print_operation_result(op, &result);
                 }
                 results.push(result);
+
+                // Reload roles/motivations so subsequent operations see newly
+                // created entities (e.g. a modify_role targeting a role that
+                // was just created in the same batch).
+                if matches!(
+                    op.op.as_str(),
+                    "create_role" | "modify_role" | "crossover_role"
+                ) && let Ok(updated) = agency::load_all_roles(&roles_dir)
+                {
+                    roles = updated;
+                }
+                if matches!(
+                    op.op.as_str(),
+                    "create_motivation" | "modify_motivation" | "crossover_motivation"
+                ) && let Ok(updated) = agency::load_all_motivations(&motivations_dir)
+                {
+                    motivations = updated;
+                }
             }
             Err(e) => {
                 let err_msg = format!("Failed to apply operation {:?}: {}", op.op, e);

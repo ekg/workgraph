@@ -249,7 +249,7 @@ fn gather_task_summary(dir: &Path) -> Result<TaskSummaryInfo> {
                     let all_blockers_done = task.blocked_by.iter().all(|bid| {
                         graph
                             .get_task(bid)
-                            .map(|t| t.status == Status::Done)
+                            .map(|t| t.status.is_terminal())
                             .unwrap_or(true)
                     });
                     if has_future_ready_after && all_blockers_done {

@@ -556,7 +556,7 @@ pub fn execute_ready(workgraph_dir: &Path) -> String {
                 && t.blocked_by.iter().all(|dep| {
                     graph
                         .get_task(dep)
-                        .map(|d| d.status == Status::Done)
+                        .map(|d| d.status.is_terminal())
                         .unwrap_or(true)
                 })
         })

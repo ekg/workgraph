@@ -91,8 +91,8 @@ fn build_blocking_tree(
                 continue;
             }
             if let Some(blocker) = graph.get_task(blocker_id) {
-                // Only include if not done
-                if blocker.status != Status::Done {
+                // Only include if still actively blocking (not terminal)
+                if !blocker.status.is_terminal() {
                     let child = build_blocking_tree(graph, blocker_id, visited);
                     node.children.push(child);
                 }
@@ -126,7 +126,7 @@ fn is_task_ready(graph: &WorkGraph, task: &Task) -> bool {
     task.blocked_by.iter().all(|blocker_id| {
         graph
             .get_task(blocker_id)
-            .map(|t| t.status == Status::Done)
+            .map(|t| t.status.is_terminal())
             .unwrap_or(true)
     })
 }

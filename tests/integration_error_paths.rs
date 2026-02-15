@@ -88,30 +88,28 @@ fn test_load_missing_graph_file_error_message_is_useful() {
 
 #[test]
 fn test_save_to_readonly_directory_returns_error() {
-    // Create a directory, write a graph, then make the file unwritable
+    // save_graph uses atomic write (temp file + rename), so the directory
+    // must be writable for temp file creation to succeed.
+    use std::os::unix::fs::PermissionsExt;
+
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("graph.jsonl");
 
     let graph = WorkGraph::new();
     save_graph(&graph, &path).unwrap();
 
-    // Make the file read-only
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    perms.set_readonly(true);
-    std::fs::set_permissions(&path, perms).unwrap();
+    // Make the directory read-only so temp file creation fails
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
-    // Saving to a read-only file should fail
+    // Saving should fail because we can't create the temp file
     let mut graph2 = WorkGraph::new();
     graph2.add_node(Node::Task(make_task("t1")));
     let result = save_graph(&graph2, &path);
 
     // Restore permissions for cleanup
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(false);
-    std::fs::set_permissions(&path, perms).unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    assert!(result.is_err(), "Saving to read-only file should fail");
+    assert!(result.is_err(), "Saving to read-only directory should fail");
 }
 
 // ===========================================================================
@@ -319,8 +317,8 @@ fn test_done_task_treated_as_done_by_blockers() {
 }
 
 #[test]
-fn test_abandoned_task_blocks_dependents() {
-    // An Abandoned task is NOT Done, so it should still block dependents
+fn test_abandoned_task_unblocks_dependents() {
+    // Abandoned is a terminal state — dependents should proceed
     let mut graph = WorkGraph::new();
 
     let mut t1 = make_task("t1");
@@ -332,24 +330,23 @@ fn test_abandoned_task_blocks_dependents() {
     graph.add_node(Node::Task(t1));
     graph.add_node(Node::Task(t2));
 
-    // t2 is blocked because t1 is Abandoned (not Done)
+    // t2 should be ready because t1 is terminal (Abandoned)
     let ready = ready_tasks(&graph);
     assert!(
-        !ready.iter().any(|t| t.id == "t2"),
-        "Task blocked by Abandoned task should NOT be ready"
+        ready.iter().any(|t| t.id == "t2"),
+        "Task blocked by Abandoned task should be ready (terminal state)"
     );
 
     let blockers = blocked_by(&graph, "t2");
-    assert_eq!(
-        blockers.len(),
-        1,
-        "Abandoned task should still appear as blocker"
+    assert!(
+        blockers.is_empty(),
+        "Abandoned task should not appear as blocker"
     );
-    assert_eq!(blockers[0].id, "t1");
 }
 
 #[test]
-fn test_failed_task_blocks_dependents() {
+fn test_failed_task_unblocks_dependents() {
+    // Failed is a terminal state — dependents should proceed
     let mut graph = WorkGraph::new();
 
     let mut t1 = make_task("t1");
@@ -364,8 +361,8 @@ fn test_failed_task_blocks_dependents() {
 
     let ready = ready_tasks(&graph);
     assert!(
-        !ready.iter().any(|t| t.id == "t2"),
-        "Task blocked by Failed task should NOT be ready"
+        ready.iter().any(|t| t.id == "t2"),
+        "Task blocked by Failed task should be ready (terminal state)"
     );
 }
 

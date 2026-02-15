@@ -45,8 +45,8 @@ pub fn run(dir: &Path, json: bool) -> Result<()> {
 
     let graph = load_graph(&path).context("Failed to load graph")?;
 
-    // Get non-done tasks only
-    let active_tasks: Vec<_> = graph.tasks().filter(|t| t.status != Status::Done).collect();
+    // Get active tasks only (exclude terminal states: done, failed, abandoned)
+    let active_tasks: Vec<_> = graph.tasks().filter(|t| !t.status.is_terminal()).collect();
 
     if active_tasks.is_empty() {
         if json {
@@ -81,12 +81,12 @@ pub fn run(dir: &Path, json: bool) -> Result<()> {
         .filter(|t| !cycle_nodes.contains(t.id.as_str()))
         .filter(|t| {
             t.blocked_by.iter().all(|blocker_id| {
-                // Not blocked by any active non-done task
+                // Not blocked by any active non-terminal task
                 !active_ids.contains(blocker_id.as_str())
                     || cycle_nodes.contains(blocker_id.as_str())
                     || graph
                         .get_task(blocker_id)
-                        .map(|bt| bt.status == Status::Done)
+                        .map(|bt| bt.status.is_terminal())
                         .unwrap_or(true)
             })
         })

@@ -208,7 +208,7 @@ pub fn suggest_for_actor(dir: &Path, actor_id: &str, json: bool) -> Result<()> {
                 && t.blocked_by.iter().all(|b| {
                     graph
                         .get_task(b)
-                        .map(|bt| bt.status == Status::Done)
+                        .map(|bt| bt.status.is_terminal())
                         .unwrap_or(true)
                 })
         })
@@ -224,7 +224,7 @@ pub fn suggest_for_actor(dir: &Path, actor_id: &str, json: bool) -> Result<()> {
         let mut doable_count = 0;
 
         for step in &trajectory.steps {
-            if step.status == Status::Done || step.status == Status::InProgress {
+            if step.status.is_terminal() || step.status == Status::InProgress {
                 continue;
             }
 

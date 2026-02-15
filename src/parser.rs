@@ -133,24 +133,50 @@ pub fn load_graph<P: AsRef<Path>>(path: P) -> Result<WorkGraph, ParseError> {
 }
 
 /// Save a work graph to a JSONL file
-/// Uses advisory file locking to prevent concurrent access corruption
+/// Uses advisory file locking and atomic write (temp file + rename) to
+/// prevent data loss on crash.
 pub fn save_graph<P: AsRef<Path>>(graph: &WorkGraph, path: P) -> Result<(), ParseError> {
-    let lock_path = get_lock_path(&path);
+    let path = path.as_ref();
+    let lock_path = get_lock_path(path);
     let _lock = FileLock::acquire(&lock_path)?;
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
+    // Write to a temporary file in the same directory, then atomically rename.
+    // This ensures a crash mid-write leaves the original file intact.
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let tmp_path = parent.join(format!(".graph.tmp.{}", std::process::id()));
 
-    for node in graph.nodes() {
-        let json =
-            serde_json::to_string(node).map_err(|e| ParseError::Json { line: 0, source: e })?;
-        writeln!(file, "{}", json)?;
+    let result = (|| -> Result<(), ParseError> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+
+        for node in graph.nodes() {
+            let json =
+                serde_json::to_string(node).map_err(|e| ParseError::Json { line: 0, source: e })?;
+            writeln!(file, "{}", json)?;
+        }
+
+        file.flush()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            // fsync to ensure data is on disk before rename
+            unsafe { libc::fsync(file.as_raw_fd()) };
+        }
+
+        Ok(())
+    })();
+
+    if result.is_ok() {
+        std::fs::rename(&tmp_path, path)?;
+    } else {
+        // Clean up temp file on failure
+        let _ = std::fs::remove_file(&tmp_path);
     }
 
-    Ok(())
+    result
     // Lock is automatically released when _lock goes out of scope
 }
 
@@ -655,15 +681,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("readonly.jsonl");
 
-        // Create the file, then make it read-only
+        // Create the file, then make the directory read-only so the temp
+        // file cannot be created (atomic write uses a temp file + rename).
         File::create(&file_path).unwrap();
-        std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
         let graph = WorkGraph::new();
         let result = save_graph(&graph, &file_path);
         assert!(result.is_err());
         // Clean up: restore write permission so tempdir can be deleted
-        std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]

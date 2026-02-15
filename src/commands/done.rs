@@ -219,6 +219,48 @@ mod tests {
     }
 
     #[test]
+    fn test_done_with_failed_blocker_succeeds() {
+        // Failed blockers are terminal — they should not block dependents
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        let blocker = make_task("blocker", "Failed blocker", Status::Failed);
+        let mut blocked = make_task("blocked", "Blocked task", Status::Open);
+        blocked.blocked_by = vec!["blocker".to_string()];
+
+        setup_workgraph(dir_path, vec![blocker, blocked]);
+
+        let result = run(dir_path, "blocked");
+        assert!(result.is_ok());
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+        let task = graph.get_task("blocked").unwrap();
+        assert_eq!(task.status, Status::Done);
+    }
+
+    #[test]
+    fn test_done_with_abandoned_blocker_succeeds() {
+        // Abandoned blockers are terminal — they should not block dependents
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        let blocker = make_task("blocker", "Abandoned blocker", Status::Abandoned);
+        let mut blocked = make_task("blocked", "Blocked task", Status::Open);
+        blocked.blocked_by = vec!["blocker".to_string()];
+
+        setup_workgraph(dir_path, vec![blocker, blocked]);
+
+        let result = run(dir_path, "blocked");
+        assert!(result.is_ok());
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+        let task = graph.get_task("blocked").unwrap();
+        assert_eq!(task.status, Status::Done);
+    }
+
+    #[test]
     fn test_done_verified_task_succeeds() {
         let dir = tempdir().unwrap();
         let dir_path = dir.path();

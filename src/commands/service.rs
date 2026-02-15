@@ -308,6 +308,12 @@ impl CoordinatorState {
         }
     }
 
+    /// Load coordinator state, defaulting to empty if missing or corrupt.
+    /// Corrupt files already emit a warning via `load()`.
+    pub fn load_or_default(dir: &Path) -> Self {
+        Self::load(dir).unwrap_or_default()
+    }
+
     pub fn remove(dir: &Path) {
         let path = coordinator_state_path(dir);
         let _ = fs::remove_file(&path);
@@ -377,12 +383,15 @@ pub fn coordinator_tick(
     {
         let ready = ready_tasks(&graph);
         if ready.is_empty() {
-            let done = graph.tasks().filter(|t| t.status == Status::Done).count();
+            let terminal = graph.tasks().filter(|t| t.status.is_terminal()).count();
             let total = graph.tasks().count();
-            if done == total && total > 0 {
+            if terminal == total && total > 0 {
                 eprintln!("[coordinator] All {} tasks complete!", total);
             } else {
-                eprintln!("[coordinator] No ready tasks (done: {}/{})", done, total);
+                eprintln!(
+                    "[coordinator] No ready tasks (terminal: {}/{})",
+                    terminal, total
+                );
             }
             return Ok(TickResult {
                 agents_alive: alive_count,
@@ -2070,7 +2079,7 @@ fn handle_status(dir: &Path) -> IpcResponse {
     let idle_count = registry.idle_count();
 
     // Use persisted coordinator state (reflects effective config + runtime metrics)
-    let coord = CoordinatorState::load(dir).unwrap_or_default();
+    let coord = CoordinatorState::load_or_default(dir);
 
     IpcResponse::success(serde_json::json!({
         "status": "running",
@@ -2311,7 +2320,7 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
         .unwrap_or_else(|_| "unknown".to_string());
 
     // Load coordinator state (persisted by daemon, reflects effective config + runtime)
-    let coord = CoordinatorState::load(dir).unwrap_or_default();
+    let coord = CoordinatorState::load_or_default(dir);
 
     // Log file info
     let log_path = log_file_path(dir);

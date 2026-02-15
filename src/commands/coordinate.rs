@@ -86,8 +86,8 @@ pub fn get_coordination_status(graph: &workgraph::graph::WorkGraph) -> Coordinat
                 && t.blocked_by.iter().any(|blocker_id| {
                     graph
                         .get_task(blocker_id)
-                        .map(|b| b.status != Status::Done)
-                        .unwrap_or(false)
+                        .map(|b| !b.status.is_terminal())
+                        .unwrap_or(true) // Missing blocker = unresolved (consistent with query.rs)
                 })
         })
         .map(BlockedTaskSummary::from_task)
@@ -511,11 +511,16 @@ mod tests {
 
         let status = get_coordination_status(&graph);
 
-        // Blockers don't exist in graph, so blocked_by check returns false (unwrap_or(false)).
-        // Tasks with nonexistent blockers should still appear in the status.
+        // Blockers don't exist in graph, so they're treated as unresolved (unwrap_or(true)),
+        // consistent with query.rs. Tasks with nonexistent blockers appear as blocked.
         assert!(
             status.total_count > 0,
             "Tasks with nonexistent blockers should be counted"
+        );
+        assert_eq!(
+            status.blocked.len(),
+            2,
+            "Tasks with nonexistent blockers should be blocked"
         );
     }
 

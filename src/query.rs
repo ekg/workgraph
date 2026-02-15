@@ -189,12 +189,12 @@ where
                 continue; // Already processed
             }
 
-            // Check if all blockers are now completed (in our plan or actually done)
+            // Check if all blockers are now resolved (in our plan or terminal)
             let blockers_done = task.blocked_by.iter().all(|blocker_id| {
                 completed_in_plan.contains(blocker_id.as_str())
                     || graph
                         .get_task(blocker_id)
-                        .map(|t| t.status == Status::Done)
+                        .map(|t| t.status.is_terminal())
                         .unwrap_or(true)
             });
 
@@ -256,11 +256,11 @@ pub fn ready_tasks(graph: &WorkGraph) -> Vec<&Task> {
             if !is_time_ready(task) {
                 return false;
             }
-            // All blockers must be done
+            // All blockers must be terminal (done, failed, or abandoned)
             task.blocked_by.iter().all(|blocker_id| {
                 graph
                     .get_task(blocker_id)
-                    .map(|t| t.status == Status::Done)
+                    .map(|t| t.status.is_terminal())
                     .unwrap_or(true) // If blocker doesn't exist, treat as unblocked
             })
         })
@@ -276,7 +276,7 @@ pub fn blocked_by<'a>(graph: &'a WorkGraph, task_id: &str) -> Vec<&'a Task> {
     task.blocked_by
         .iter()
         .filter_map(|id| graph.get_task(id))
-        .filter(|t| t.status != Status::Done)
+        .filter(|t| !t.status.is_terminal())
         .collect()
 }
 
@@ -443,6 +443,46 @@ mod tests {
 
         let blockers = blocked_by(&graph, "blocked");
         assert!(blockers.is_empty());
+    }
+
+    #[test]
+    fn test_blocked_by_excludes_failed_blockers() {
+        let mut graph = WorkGraph::new();
+
+        let mut blocker = make_task("blocker", "Blocker");
+        blocker.status = Status::Failed;
+
+        let mut blocked = make_task("blocked", "Blocked");
+        blocked.blocked_by = vec!["blocker".to_string()];
+
+        graph.add_node(Node::Task(blocker));
+        graph.add_node(Node::Task(blocked));
+
+        let blockers = blocked_by(&graph, "blocked");
+        assert!(
+            blockers.is_empty(),
+            "Failed blockers should not block dependents"
+        );
+    }
+
+    #[test]
+    fn test_blocked_by_excludes_abandoned_blockers() {
+        let mut graph = WorkGraph::new();
+
+        let mut blocker = make_task("blocker", "Blocker");
+        blocker.status = Status::Abandoned;
+
+        let mut blocked = make_task("blocked", "Blocked");
+        blocked.blocked_by = vec!["blocker".to_string()];
+
+        graph.add_node(Node::Task(blocker));
+        graph.add_node(Node::Task(blocked));
+
+        let blockers = blocked_by(&graph, "blocked");
+        assert!(
+            blockers.is_empty(),
+            "Abandoned blockers should not block dependents"
+        );
     }
 
     #[test]
@@ -903,10 +943,58 @@ mod tests {
         graph.add_node(Node::Task(b_failed));
         graph.add_node(Node::Task(task));
 
-        // Only Done counts as unblocked — InProgress and Failed don't
+        // Terminal states (Done, Failed, Abandoned) count as resolved.
+        // InProgress still blocks, so t should NOT be ready.
         let ready = ready_tasks(&graph);
         let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
-        assert!(!ready_ids.contains(&"t"), "t should NOT be ready");
+        assert!(
+            !ready_ids.contains(&"t"),
+            "t should NOT be ready (b-ip is still in-progress)"
+        );
+    }
+
+    #[test]
+    fn test_ready_tasks_failed_blocker_unblocks() {
+        // A task whose only blocker has failed should become ready
+        let mut graph = WorkGraph::new();
+
+        let mut b_failed = make_task("b-failed", "Failed blocker");
+        b_failed.status = Status::Failed;
+
+        let mut task = make_task("t", "Blocked task");
+        task.blocked_by = vec!["b-failed".to_string()];
+
+        graph.add_node(Node::Task(b_failed));
+        graph.add_node(Node::Task(task));
+
+        let ready = ready_tasks(&graph);
+        let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            ready_ids.contains(&"t"),
+            "t should be ready when blocker has failed"
+        );
+    }
+
+    #[test]
+    fn test_ready_tasks_abandoned_blocker_unblocks() {
+        // A task whose only blocker was abandoned should become ready
+        let mut graph = WorkGraph::new();
+
+        let mut b_abandoned = make_task("b-abandoned", "Abandoned blocker");
+        b_abandoned.status = Status::Abandoned;
+
+        let mut task = make_task("t", "Blocked task");
+        task.blocked_by = vec!["b-abandoned".to_string()];
+
+        graph.add_node(Node::Task(b_abandoned));
+        graph.add_node(Node::Task(task));
+
+        let ready = ready_tasks(&graph);
+        let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            ready_ids.contains(&"t"),
+            "t should be ready when blocker was abandoned"
+        );
     }
 
     // ========== Orphan blocker tests ==========
