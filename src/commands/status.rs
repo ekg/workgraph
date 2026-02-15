@@ -360,9 +360,9 @@ fn print_status(status: &StatusOutput) {
             status.agents.alive, status.agents.dead
         );
         for agent in &status.agents.active {
-            // Truncate task_id if too long
-            let task_display = if agent.task_id.len() > 24 {
-                format!("{}...", &agent.task_id[..21])
+            // Truncate task_id if too long (char-safe to avoid UTF-8 panic)
+            let task_display = if agent.task_id.chars().count() > 24 {
+                format!("{}...", agent.task_id.chars().take(21).collect::<String>())
             } else {
                 agent.task_id.clone()
             };
@@ -398,9 +398,9 @@ fn print_status(status: &StatusOutput) {
         println!();
         println!("Recent:");
         for entry in &status.recent {
-            // Truncate title if too long
-            let title_display = if entry.title.len() > 50 {
-                format!("{}...", &entry.title[..47])
+            // Truncate title if too long (char-safe to avoid UTF-8 panic)
+            let title_display = if entry.title.chars().count() > 50 {
+                format!("{}...", entry.title.chars().take(47).collect::<String>())
             } else {
                 entry.title.clone()
             };
@@ -629,5 +629,47 @@ mod tests {
 
         let recent = gather_recent_activity(temp_dir.path()).unwrap();
         assert_eq!(recent.len(), 0);
+    }
+
+    #[test]
+    fn test_display_status_unicode_truncation() {
+        // Verify that Unicode task titles and IDs don't panic on truncation.
+        // This uses the print_status path indirectly by testing the truncation logic.
+        // Need 51+ characters to trigger truncation
+        let long_unicode_title = "日本語のタスク名前がとても長いのでトランケートされるべきです。テスト用の文字列をもっと追加しますよ。はい。";
+        assert!(
+            long_unicode_title.chars().count() > 50,
+            "title has {} chars, need >50",
+            long_unicode_title.chars().count()
+        );
+        // Simulate the truncation logic from print_status
+        let title_display = if long_unicode_title.chars().count() > 50 {
+            format!(
+                "{}...",
+                long_unicode_title.chars().take(47).collect::<String>()
+            )
+        } else {
+            long_unicode_title.to_string()
+        };
+        assert!(title_display.ends_with("..."));
+        assert!(title_display.chars().count() <= 50);
+
+        // Need 25+ characters to trigger truncation
+        let long_unicode_id = "タスクIDが長すぎる場合のテストタスクIDが長すぎる場合";
+        assert!(
+            long_unicode_id.chars().count() > 24,
+            "id has {} chars, need >24",
+            long_unicode_id.chars().count()
+        );
+        let task_display = if long_unicode_id.chars().count() > 24 {
+            format!(
+                "{}...",
+                long_unicode_id.chars().take(21).collect::<String>()
+            )
+        } else {
+            long_unicode_id.to_string()
+        };
+        assert!(task_display.ends_with("..."));
+        assert!(task_display.chars().count() <= 24);
     }
 }

@@ -1269,8 +1269,14 @@ fn draw_node(buf: &mut [Vec<Cell>], node: &LayoutNode, buf_width: usize, buf_hei
     let indicator = status_indicator_str(&node.status);
     let max_content = w.saturating_sub(3); // 1 for left padding, 2 for borders
     let full_content = format!("{} {}", indicator, node.title);
-    let content: String = if full_content.len() > max_content {
-        format!("{}…", &full_content[..max_content.saturating_sub(1)])
+    let content: String = if full_content.chars().count() > max_content {
+        format!(
+            "{}…",
+            full_content
+                .chars()
+                .take(max_content.saturating_sub(1))
+                .collect::<String>()
+        )
     } else {
         full_content
     };

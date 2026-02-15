@@ -300,7 +300,12 @@ fn calculate_longest_path<'a>(
         None => return (0.0, vec![]),
     };
 
-    let task_hours = task.estimate.as_ref().and_then(|e| e.hours).unwrap_or(1.0);
+    let task_hours = task
+        .estimate
+        .as_ref()
+        .and_then(|e| e.hours)
+        .unwrap_or(1.0)
+        .max(0.0); // Clamp negative estimates to zero
 
     // Get tasks blocked by this one
     let blocked_tasks = forward_index.get(task_id);
@@ -710,5 +715,33 @@ mod tests {
 
         assert_eq!(hours, 8.0);
         assert_eq!(path, vec!["t1".to_string()]);
+    }
+
+    #[test]
+    fn test_negative_estimate_clamped_to_zero() {
+        // Negative estimates should be clamped to 0 and not corrupt path calculations
+        let mut graph = WorkGraph::new();
+
+        let t1 = make_task_with_hours("t1", "Task 1", 10.0);
+        let mut t2 = make_task_with_hours("t2", "Task 2", -5.0);
+        t2.blocked_by = vec!["t1".to_string()];
+
+        graph.add_node(Node::Task(t1));
+        graph.add_node(Node::Task(t2));
+
+        let active_ids: HashSet<&str> = graph.tasks().map(|t| t.id.as_str()).collect();
+        let cycle_nodes: HashSet<&str> = HashSet::new();
+        let forward_index = build_forward_index(&graph, &active_ids, &cycle_nodes);
+        let mut memo = HashMap::new();
+
+        let (hours, _path) =
+            calculate_longest_path("t1", &graph, &forward_index, &mut memo, &cycle_nodes);
+
+        // t1 = 10h, t2 = 0h (clamped from -5), total path should be 10
+        assert!(
+            hours >= 10.0,
+            "negative estimate should not reduce path length, got {}",
+            hours
+        );
     }
 }

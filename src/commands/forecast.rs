@@ -240,9 +240,13 @@ fn create_scenario(name: String, buffer: f64, base_hours: f64, hours_per_week: f
 
     let (completion_date, weeks_to_complete) = if hours_per_week > 0.0 && estimated_hours > 0.0 {
         let weeks = estimated_hours / hours_per_week;
-        let days = (weeks * 7.0).ceil() as i64;
-        let date = Utc::now() + Duration::days(days);
-        (Some(date.format("%b %d, %Y").to_string()), Some(weeks))
+        if !weeks.is_finite() || weeks < 0.0 {
+            (None, None)
+        } else {
+            let days = (weeks * 7.0).ceil() as i64;
+            let date = Utc::now() + Duration::days(days);
+            (Some(date.format("%b %d, %Y").to_string()), Some(weeks))
+        }
     } else {
         (None, None)
     };

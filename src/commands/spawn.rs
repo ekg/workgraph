@@ -257,8 +257,8 @@ fn spawn_agent_inner(
 
     let wrapper_script = format!(
         r#"#!/bin/bash
-TASK_ID="{task_id}"
-OUTPUT_FILE="{output_file}"
+TASK_ID={escaped_task_id}
+OUTPUT_FILE={escaped_output_file}
 
 # Allow nested Claude Code sessions (spawned agents are independent)
 unset CLAUDECODE
@@ -284,8 +284,8 @@ fi
 
 exit $EXIT_CODE
 "#,
-        task_id = task_id,
-        output_file = output_file_str,
+        escaped_task_id = shell_escape(task_id),
+        escaped_output_file = shell_escape(&output_file_str),
         inner_command = inner_command,
         complete_cmd = complete_cmd,
         complete_msg = complete_msg,
@@ -340,17 +340,8 @@ exit $EXIT_CODE
         }
     }
 
-    // Spawn the process (don't wait)
-    let child = cmd.spawn().with_context(|| {
-        format!(
-            "Failed to spawn executor '{}' (command: {})",
-            executor_name, settings.command
-        )
-    })?;
-
-    let pid = child.id();
-
-    // Now claim the task
+    // Claim the task BEFORE spawning the process to prevent race conditions
+    // where two concurrent spawns both pass the status check.
     let task = graph.get_task_mut(task_id).unwrap();
     task.status = Status::InProgress;
     task.started_at = Some(Utc::now().to_rfc3339());
@@ -370,6 +361,35 @@ exit $EXIT_CODE
     });
 
     save_graph(&graph, &graph_path).context("Failed to save graph")?;
+
+    // Spawn the process (don't wait). If spawn fails, unclaim the task.
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            // Spawn failed — revert the task claim so it's not stuck
+            if let Ok(mut rollback_graph) = load_graph(&graph_path)
+                && let Some(t) = rollback_graph.get_task_mut(task_id)
+            {
+                t.status = Status::Open;
+                t.started_at = None;
+                t.assigned = None;
+                t.log.push(LogEntry {
+                    timestamp: Utc::now().to_rfc3339(),
+                    actor: Some(temp_agent_id.clone()),
+                    message: format!("Spawn failed, reverting claim: {}", e),
+                });
+                let _ = save_graph(&rollback_graph, &graph_path);
+            }
+            return Err(anyhow::anyhow!(
+                "Failed to spawn executor '{}' (command: {}): {}",
+                executor_name,
+                settings.command,
+                e
+            ));
+        }
+    };
+
+    let pid = child.id();
 
     // Register the agent
     let agent_id = agent_registry.register_agent(pid, task_id, executor_name, &output_file_str);
@@ -664,7 +684,10 @@ mod tests {
 
         // Read wrapper script and verify it contains the expected auto-complete logic
         let script = fs::read_to_string(&wrapper_path).unwrap();
-        assert!(script.contains("TASK_ID=\"t1\""));
+        assert!(
+            script.contains("TASK_ID='t1'"),
+            "Task ID should be shell-escaped with single quotes"
+        );
         assert!(script.contains("wg done \"$TASK_ID\""));
         assert!(script.contains("[wrapper] Agent exited successfully, marking task done"));
         assert!(script.contains("wg show \"$TASK_ID\" --json"));

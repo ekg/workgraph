@@ -75,7 +75,16 @@ pub fn aggregate_usage_stats(dir: &Path) -> anyhow::Result<usize> {
     // Load existing stats (or start fresh)
     let mut usage = if stats.exists() {
         let content = fs::read_to_string(&stats)?;
-        serde_json::from_str(&content).unwrap_or_default()
+        match serde_json::from_str(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "Warning: corrupt usage stats at {:?}, resetting: {}",
+                    stats, e
+                );
+                UsageStats::default()
+            }
+        }
     } else {
         UsageStats::default()
     };
