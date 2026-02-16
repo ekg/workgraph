@@ -98,9 +98,15 @@ pub fn check_loop_edges(graph: &WorkGraph) -> Vec<LoopEdgeIssue> {
     let mut issues = Vec::new();
 
     for task in graph.tasks() {
+        // Skip validation for terminal tasks — their loop edges are inert
+        if task.status.is_terminal() {
+            continue;
+        }
+
         for edge in &task.loops_to {
-            // Self-loop: a task cannot loops_to itself
-            if edge.target == task.id {
+            // Self-loop without delay: would immediately re-open on done.
+            // Self-loops WITH delay are a valid polling pattern.
+            if edge.target == task.id && edge.delay.is_none() {
                 issues.push(LoopEdgeIssue {
                     from: task.id.clone(),
                     target: edge.target.clone(),
@@ -458,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn test_loop_self_loop() {
+    fn test_loop_self_loop_no_delay() {
         let mut graph = WorkGraph::new();
         let mut t1 = make_task("t1", "Task 1");
         t1.loops_to = vec![LoopEdge {
@@ -473,6 +479,67 @@ mod tests {
         let issues = check_loop_edges(&graph);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].kind, LoopEdgeIssueKind::SelfLoop);
+    }
+
+    #[test]
+    fn test_loop_self_loop_with_delay_is_ok() {
+        // Self-loops with delay are a valid polling pattern
+        let mut graph = WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.loops_to = vec![LoopEdge {
+            target: "t1".to_string(),
+            guard: None,
+            max_iterations: 100,
+            delay: Some("30s".to_string()),
+        }];
+
+        graph.add_node(Node::Task(t1));
+
+        let issues = check_loop_edges(&graph);
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn test_loop_edges_skipped_for_terminal_tasks() {
+        // Terminal tasks (done/failed/abandoned) should not be validated
+        let mut graph = WorkGraph::new();
+
+        // Done task with a self-loop (no delay) — should be skipped
+        let mut t1 = make_task("t1", "Done task");
+        t1.status = Status::Done;
+        t1.loops_to = vec![LoopEdge {
+            target: "t1".to_string(),
+            guard: None,
+            max_iterations: 100,
+            delay: None,
+        }];
+
+        // Failed task with missing target — should be skipped
+        let mut t2 = make_task("t2", "Failed task");
+        t2.status = Status::Failed;
+        t2.loops_to = vec![LoopEdge {
+            target: "nonexistent".to_string(),
+            guard: None,
+            max_iterations: 3,
+            delay: None,
+        }];
+
+        // Abandoned task — should be skipped
+        let mut t3 = make_task("t3", "Abandoned task");
+        t3.status = Status::Abandoned;
+        t3.loops_to = vec![LoopEdge {
+            target: "t3".to_string(),
+            guard: None,
+            max_iterations: 0,
+            delay: None,
+        }];
+
+        graph.add_node(Node::Task(t1));
+        graph.add_node(Node::Task(t2));
+        graph.add_node(Node::Task(t3));
+
+        let issues = check_loop_edges(&graph);
+        assert!(issues.is_empty(), "Terminal tasks should not produce loop edge issues, got: {:?}", issues);
     }
 
     #[test]

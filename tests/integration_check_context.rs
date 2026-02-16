@@ -432,7 +432,8 @@ fn check_valid_loop_edge() {
 }
 
 #[test]
-fn check_self_loop_flagged() {
+fn check_self_loop_with_delay_allowed() {
+    // Self-loops WITH delay are a valid polling pattern and should not be flagged
     let mut task = make_task("poll", "Poller");
     task.loops_to.push(LoopEdge {
         target: "poll".to_string(),
@@ -445,9 +446,33 @@ fn check_self_loop_flagged() {
     let graph = load_graph(&path).unwrap();
     let result = check_all(&graph);
 
-    // Self-loops are flagged as issues by the check system
+    assert!(
+        result.loop_edge_issues.is_empty(),
+        "Self-loops with delay should not be flagged"
+    );
+}
+
+#[test]
+fn check_self_loop_no_delay_flagged() {
+    // Self-loops WITHOUT delay would immediately re-open on done — should be flagged
+    let mut task = make_task("poll", "Poller");
+    task.loops_to.push(LoopEdge {
+        target: "poll".to_string(),
+        guard: None,
+        max_iterations: 10,
+        delay: None,
+    });
+    let (_dir, path) = setup_graph(vec![task]);
+
+    let graph = load_graph(&path).unwrap();
+    let result = check_all(&graph);
+
     assert!(
         !result.loop_edge_issues.is_empty(),
-        "Self-loops should be flagged"
+        "Self-loops without delay should be flagged"
+    );
+    assert!(
+        result.loop_edge_issues.iter().any(|i| i.kind == workgraph::check::LoopEdgeIssueKind::SelfLoop),
+        "Should flag as SelfLoop issue"
     );
 }
