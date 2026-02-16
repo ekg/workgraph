@@ -278,6 +278,10 @@ enum Commands {
         /// Filter by status
         #[arg(long)]
         status: Option<String>,
+
+        /// Only show paused tasks
+        #[arg(long)]
+        paused: bool,
     },
 
     /// Visualize the dependency graph (ASCII tree by default)
@@ -1710,8 +1714,8 @@ fn main() -> Result<()> {
         Commands::Blocked { id } => commands::blocked::run(&workgraph_dir, &id, cli.json),
         Commands::WhyBlocked { id } => commands::why_blocked::run(&workgraph_dir, &id, cli.json),
         Commands::Check => commands::check::run(&workgraph_dir),
-        Commands::List { status } => {
-            commands::list::run(&workgraph_dir, status.as_deref(), cli.json)
+        Commands::List { status, paused } => {
+            commands::list::run(&workgraph_dir, status.as_deref(), paused, cli.json)
         }
         Commands::Viz {
             all,
