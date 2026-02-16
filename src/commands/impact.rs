@@ -104,7 +104,7 @@ pub fn run(dir: &Path, id: &str, json: bool) -> Result<()> {
             task: task_info,
             direct_dependents,
             transitive_dependents,
-            dependency_chains: chains.clone(),
+            dependency_chains: chains,
             impact_summary: ImpactSummary {
                 total_tasks_affected: all_dependents.len(),
                 total_hours_at_risk: total_hours,

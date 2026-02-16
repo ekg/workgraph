@@ -139,7 +139,7 @@ pub fn run(
             if json {
                 let output = NotifyResult {
                     task_id: task_id.to_string(),
-                    room: Some(target_room.clone()),
+                    room: Some(target_room),
                     sent: true,
                     error: None,
                 };

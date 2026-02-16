@@ -1281,7 +1281,7 @@ fn print_help(dir: &Path, show_all: bool, alphabetical: bool) {
 
     if use_alphabetical {
         // Simple alphabetical listing
-        let mut sorted = subcommands.clone();
+        let mut sorted = subcommands;
         sorted.sort_by(|a, b| a.0.cmp(&b.0));
 
         let to_show = if show_all {

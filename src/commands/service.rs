@@ -1567,7 +1567,7 @@ pub fn run_start(
     // Start daemon in background
     let mut args = vec![
         "--dir".to_string(),
-        dir_str.clone(),
+        dir_str,
         "service".to_string(),
         "daemon".to_string(),
         "--socket".to_string(),

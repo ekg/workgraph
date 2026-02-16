@@ -178,7 +178,7 @@ pub fn run(dir: &Path, dry_run: bool, older: Option<&str>, list: bool, json: boo
     append_to_archive(&tasks_to_archive, &arch_path)?;
 
     // 2. Remove archived tasks from the main graph
-    let mut modified_graph = graph.clone();
+    let mut modified_graph = graph;
     for task in &tasks_to_archive {
         modified_graph.remove_node(&task.id);
     }

@@ -58,9 +58,9 @@ pub fn run(dir: &Path, task_id: &str, from_actor: &str, to_actor: &str) -> Resul
         from_actor, to_actor
     );
     task.log.push(LogEntry {
-        timestamp: now.clone(),
+        timestamp: now,
         actor: Some(to_actor.to_string()),
-        message: log_message.clone(),
+        message: log_message,
     });
 
     save_graph(&graph, &path).context("Failed to save graph")?;

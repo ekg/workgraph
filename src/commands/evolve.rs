@@ -303,7 +303,7 @@ pub fn run(
                 .join(format!("{}.yaml", agent_hash));
             if let Ok(agent) = agency::load_agent(&agent_path) {
                 ids.insert(agent.role_id.clone());
-                ids.insert(agent.motivation_id.clone());
+                ids.insert(agent.motivation_id);
             }
         }
         ids
