@@ -27,6 +27,17 @@ pub fn run(dir: &Path) -> Result<()> {
         }
     }
 
+    // Stale assignments are warnings
+    if !result.stale_assignments.is_empty() {
+        eprintln!(
+            "Warning: Stale assignments (task is open but has an agent assigned — agent may have died):"
+        );
+        for stale in &result.stale_assignments {
+            eprintln!("  {} (assigned to '{}')", stale.task_id, stale.assigned);
+            warnings += 1;
+        }
+    }
+
     // Orphan references are errors
     if !result.orphan_refs.is_empty() {
         eprintln!("Error: Orphan references:");
@@ -95,41 +106,14 @@ pub fn run(dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use workgraph::graph::{LoopEdge, Node, Status, Task};
+    use workgraph::graph::{LoopEdge, Node, Task};
     use workgraph::parser::save_graph;
 
     fn make_task(id: &str, title: &str) -> Task {
         Task {
             id: id.to_string(),
             title: title.to_string(),
-            description: None,
-            status: Status::Open,
-            assigned: None,
-            estimate: None,
-            blocks: vec![],
-            blocked_by: vec![],
-            requires: vec![],
-            tags: vec![],
-            skills: vec![],
-            inputs: vec![],
-            deliverables: vec![],
-            artifacts: vec![],
-            exec: None,
-            not_before: None,
-            created_at: None,
-            started_at: None,
-            completed_at: None,
-            log: vec![],
-            retry_count: 0,
-            max_retries: None,
-            failure_reason: None,
-            model: None,
-            verify: None,
-            agent: None,
-            loops_to: vec![],
-            loop_iteration: 0,
-            ready_after: None,
-            paused: false,
+            ..Task::default()
         }
     }
 
@@ -247,5 +231,24 @@ mod tests {
 
         let result = run(&dir);
         assert!(result.is_ok(), "valid loop edges should pass check");
+    }
+
+    #[test]
+    fn test_check_warns_on_stale_assignments_but_no_error() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".workgraph");
+
+        let mut graph = workgraph::graph::WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.assigned = Some("agent-dead".to_string());
+        graph.add_node(Node::Task(t1));
+        setup_graph(&dir, &graph);
+
+        // Stale assignments are warnings, not errors — run should succeed
+        let result = run(&dir);
+        assert!(
+            result.is_ok(),
+            "stale assignments alone should not cause check failure (they are warnings)"
+        );
     }
 }

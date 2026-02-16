@@ -334,20 +334,15 @@ pub struct TickResult {
     pub agents_spawned: usize,
 }
 
-/// Single coordinator tick: spawn agents on ready tasks
-pub fn coordinator_tick(
+/// Clean up dead agents and count alive ones. Returns `None` with an early
+/// `TickResult` if the alive count already meets `max_agents`.
+fn cleanup_and_count_alive(
     dir: &Path,
+    graph_path: &Path,
     max_agents: usize,
-    executor: &str,
-    model: Option<&str>,
-) -> Result<TickResult> {
-    let graph_path = graph_path(dir);
-
-    // Load config for agency settings
-    let config = Config::load_or_default(dir);
-
+) -> Result<Result<usize, TickResult>> {
     // Clean up dead agents: process exited
-    let finished_agents = cleanup_dead_agents(dir, &graph_path)?;
+    let finished_agents = cleanup_dead_agents(dir, graph_path)?;
     if !finished_agents.is_empty() {
         eprintln!(
             "[coordinator] Cleaned up {} dead agent(s): {:?}",
@@ -369,392 +364,410 @@ pub fn coordinator_tick(
             "[coordinator] Max agents ({}) running, waiting...",
             max_agents
         );
-        return Ok(TickResult {
+        return Ok(Err(TickResult {
+            agents_alive: alive_count,
+            tasks_ready: 0,
+            agents_spawned: 0,
+        }));
+    }
+
+    Ok(Ok(alive_count))
+}
+
+/// Check whether any tasks are ready. Returns `None` with an early `TickResult`
+/// if no ready tasks exist.
+fn check_ready_or_return(
+    graph: &workgraph::graph::WorkGraph,
+    alive_count: usize,
+) -> Option<TickResult> {
+    let ready = ready_tasks(graph);
+    if ready.is_empty() {
+        let terminal = graph.tasks().filter(|t| t.status.is_terminal()).count();
+        let total = graph.tasks().count();
+        if terminal == total && total > 0 {
+            eprintln!("[coordinator] All {} tasks complete!", total);
+        } else {
+            eprintln!(
+                "[coordinator] No ready tasks (terminal: {}/{})",
+                terminal, total
+            );
+        }
+        return Some(TickResult {
             agents_alive: alive_count,
             tasks_ready: 0,
             agents_spawned: 0,
         });
     }
+    None
+}
 
-    // Load graph once at the start
-    let mut graph = load_graph(&graph_path).context("Failed to load graph")?;
+/// Auto-assign: build assignment subgraph for unassigned ready tasks.
+///
+/// Per the agency design (§4, §10), when auto_assign is enabled and a ready
+/// task has no agent field, the coordinator creates a blocking assignment task
+/// `assign-{task-id}` BEFORE spawning any agents.  The assigner agent is then
+/// spawned on the assignment task, inspects the agency via wg CLI, and calls
+/// `wg assign <task-id> <agent-hash>` followed by `wg done assign-{task-id}`.
+///
+/// Returns `true` if the graph was modified.
+fn build_auto_assign_tasks(
+    graph: &mut workgraph::graph::WorkGraph,
+    config: &Config,
+) -> bool {
+    let mut modified = false;
 
-    // Check if there are any ready tasks, return early if none
+    // Collect task data to avoid holding references while mutating graph
+    let ready_task_data: Vec<_> = {
+        let ready = ready_tasks(graph);
+        ready
+            .iter()
+            .map(|t| {
+                (
+                    t.id.clone(),
+                    t.title.clone(),
+                    t.description.clone(),
+                    t.skills.clone(),
+                    t.agent.clone(),
+                    t.assigned.clone(),
+                    t.tags.clone(),
+                )
+            })
+            .collect()
+    };
+
+    for (task_id, task_title, task_desc, task_skills, task_agent, task_assigned, task_tags) in
+        ready_task_data
     {
-        let ready = ready_tasks(&graph);
-        if ready.is_empty() {
-            let terminal = graph.tasks().filter(|t| t.status.is_terminal()).count();
-            let total = graph.tasks().count();
-            if terminal == total && total > 0 {
-                eprintln!("[coordinator] All {} tasks complete!", total);
-            } else {
-                eprintln!(
-                    "[coordinator] No ready tasks (terminal: {}/{})",
-                    terminal, total
-                );
-            }
-            return Ok(TickResult {
-                agents_alive: alive_count,
-                tasks_ready: 0,
-                agents_spawned: 0,
-            });
+        // Skip tasks that already have an agent or are already claimed
+        if task_agent.is_some() || task_assigned.is_some() {
+            continue;
         }
-    }
 
-    let slots_available = max_agents.saturating_sub(alive_count);
+        // Skip tasks tagged with assignment/evaluation/evolution to prevent
+        // infinite regress (assign-assign-assign-...)
+        let dominated_tags = ["assignment", "evaluation", "evolution"];
+        if task_tags
+            .iter()
+            .any(|tag| dominated_tags.contains(&tag.as_str()))
+        {
+            continue;
+        }
 
-    // Track if graph has been modified during auto-assign or auto-evaluate
-    let mut graph_modified = false;
+        let assign_task_id = format!("assign-{}", task_id);
 
-    // Auto-assign: build assignment subgraph for unassigned ready tasks.
-    //
-    // Per the agency design (§4, §10), when auto_assign is enabled and a ready
-    // task has no agent field, the coordinator creates a blocking assignment task
-    // `assign-{task-id}` BEFORE spawning any agents.  The assigner agent is then
-    // spawned on the assignment task, inspects the agency via wg CLI, and calls
-    // `wg assign <task-id> <agent-hash>` followed by `wg done assign-{task-id}`.
-    if config.agency.auto_assign {
-        // Collect task data to avoid holding references while mutating graph
-        let ready_task_data: Vec<_> = {
-            let ready = ready_tasks(&graph);
-            ready
-                .iter()
-                .map(|t| {
-                    (
-                        t.id.clone(),
-                        t.title.clone(),
-                        t.description.clone(),
-                        t.skills.clone(),
-                        t.agent.clone(),
-                        t.assigned.clone(),
-                        t.tags.clone(),
-                    )
-                })
-                .collect()
+        // Skip if assignment task already exists (idempotent)
+        if graph.get_task(&assign_task_id).is_some() {
+            continue;
+        }
+
+        // Build description for the assigner with the original task's context
+        let mut desc = format!(
+            "Assign an agent to task '{}'.\n\n## Original Task\n**Title:** {}\n",
+            task_id, task_title,
+        );
+        if let Some(ref d) = task_desc {
+            desc.push_str(&format!("**Description:** {}\n", d));
+        }
+        if !task_skills.is_empty() {
+            desc.push_str(&format!("**Skills:** {}\n", task_skills.join(", ")));
+        }
+        desc.push_str(&format!(
+            "\n## Instructions\n\n\
+             Pick the best agent for this task and assign them.\n\n\
+             ### Step 1: Gather Information\n\n\
+             Run these commands to understand the available agents and their track records:\n\
+             ```\n\
+             wg agent list --json\n\
+             wg role list --json\n\
+             wg motivation list --json\n\
+             ```\n\n\
+             For agents with evaluation history, drill into performance details:\n\
+             ```\n\
+             wg agent performance <agent-hash> --json\n\
+             ```\n\n\
+             ### Step 2: Match Agent to Task\n\n\
+             Compare each agent's capabilities to the task requirements:\n\n\
+             1. **Role fit**: The agent's role skills should overlap with the task's \
+             required skills. A Programmer (code-writing, testing, debugging) fits \
+             implementation tasks; a Reviewer (code-review, security-audit) fits review \
+             tasks; an Architect (system-design, dependency-analysis) fits design tasks; \
+             a Documenter (technical-writing) fits documentation tasks.\n\n\
+             2. **Motivation fit**: The agent's operational parameters should match the \
+             task's nature. A Careful agent suits tasks where correctness is critical. \
+             A Fast agent suits urgent, low-risk tasks. A Thorough agent suits complex \
+             tasks requiring deep analysis.\n\n\
+             3. **Capabilities**: Check the agent's `capabilities` list for specific \
+             technology or domain tags that match the task (e.g., \"rust\", \"python\", \
+             \"kubernetes\").\n\n\
+             ### Step 3: Use Performance Data\n\n\
+             Each agent has a `performance` record with `task_count`, `avg_score` \
+             (0.0–1.0), and individual evaluation entries. Each evaluation has \
+             dimension scores: `correctness` (40% weight), `completeness` (30%), \
+             `efficiency` (15%), `style_adherence` (15%).\n\n\
+             - **Prefer agents with higher avg_score** on similar tasks (check \
+             evaluation `task_id` and `context_id` to see what kinds of work they've \
+             done before).\n\
+             - **Weight recent evaluations more** — an agent's latest scores are more \
+             predictive than older ones.\n\
+             - **Consider dimension strengths**: If the task demands correctness above \
+             all else, prefer agents who score highest on `correctness` even if their \
+             overall average is slightly lower.\n\n\
+             ### Step 4: Handle Cold Start\n\n\
+             When agents have 0 evaluations (new agency, or new agents), you cannot \
+             rely on performance data. In this case:\n\n\
+             - **Match on role and motivation** — this is the primary signal. Pick the \
+             agent whose role skills best cover the task requirements.\n\
+             - **Spread work across untested agents** to build evaluation data. If \
+             multiple agents have 0 evaluations and similar role fit, prefer whichever \
+             has completed fewer tasks (lower `task_count`) so the agency gathers \
+             diverse signal.\n\
+             - **Default to Careful motivation** for high-stakes tasks and Fast \
+             motivation for routine work when there's no data to differentiate.\n\n\
+             ### Step 5: Balance Exploration vs Exploitation\n\n\
+             - **Exploitation (default)**: Assign the highest-scoring agent whose \
+             skills match. This maximizes expected quality.\n\
+             - **Exploration**: Occasionally assign a less-proven agent to gather new \
+             performance data. Do this when:\n\
+               - A newer agent (higher generation, or fewer evaluations) has relevant \
+             skills but limited history.\n\
+               - The top performer's score advantage is small (< 0.1 difference).\n\
+               - The task is lower-risk (not blocking many other tasks, not tagged as \
+             critical).\n\
+             - **Never explore with agents whose avg_score is below 0.4** — that \
+             signals consistent poor performance.\n\n\
+             ### Step 6: Assign\n\n\
+             Once you've chosen an agent, run:\n\
+             ```\n\
+             wg assign {} <agent-hash>\n\
+             wg done {}\n\
+             ```\n\n\
+             If no suitable agent exists for this task, report why:\n\
+             ```\n\
+             wg fail {} --reason \"No agent with matching skills for: <explanation>\"\n\
+             ```",
+            task_id, assign_task_id, assign_task_id,
+        ));
+
+        // Create the assignment task (blocks the original)
+        let assign_task = Task {
+            id: assign_task_id.clone(),
+            title: format!("Assign agent for: {}", task_title),
+            description: Some(desc),
+            status: Status::Open,
+            assigned: None,
+            estimate: None,
+            blocks: vec![task_id.clone()],
+            blocked_by: vec![],
+            requires: vec![],
+            tags: vec!["assignment".to_string(), "agency".to_string()],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
+            artifacts: vec![],
+            exec: None,
+            not_before: None,
+            created_at: Some(Utc::now().to_rfc3339()),
+            started_at: None,
+            completed_at: None,
+            log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
+            model: config.agency.assigner_model.clone(),
+            verify: None,
+            agent: config.agency.assigner_agent.clone(),
+            loops_to: vec![],
+            loop_iteration: 0,
+            ready_after: None,
+            paused: false,
         };
 
-        for (task_id, task_title, task_desc, task_skills, task_agent, task_assigned, task_tags) in
-            ready_task_data
-        {
-            // Skip tasks that already have an agent or are already claimed
-            if task_agent.is_some() || task_assigned.is_some() {
-                continue;
-            }
+        graph.add_node(Node::Task(assign_task));
 
-            // Skip tasks tagged with assignment/evaluation/evolution to prevent
-            // infinite regress (assign-assign-assign-...)
-            let dominated_tags = ["assignment", "evaluation", "evolution"];
-            if task_tags
+        // Add the assignment task as a blocker on the original task
+        if let Some(t) = graph.get_task_mut(&task_id)
+            && !t.blocked_by.contains(&assign_task_id)
+        {
+            t.blocked_by.push(assign_task_id.clone());
+        }
+
+        eprintln!(
+            "[coordinator] Created assignment task '{}' blocking '{}'",
+            assign_task_id, task_id,
+        );
+        modified = true;
+    }
+
+    modified
+}
+
+/// Auto-evaluate: create evaluation tasks for completed/active tasks.
+///
+/// Per the agency design (§4.3), when auto_evaluate is enabled the coordinator
+/// creates an evaluation task `evaluate-{task-id}` that is blocked by the
+/// original task.  When the original task completes (done or failed),
+/// the evaluation task becomes ready and the coordinator spawns an
+/// evaluator agent on it.
+///
+/// Tasks tagged "evaluation", "assignment", or "evolution" are NOT
+/// auto-evaluated to prevent infinite regress.  Abandoned tasks are also
+/// excluded.
+///
+/// Returns `true` if the graph was modified.
+fn build_auto_evaluate_tasks(
+    dir: &Path,
+    graph: &mut workgraph::graph::WorkGraph,
+    config: &Config,
+) -> bool {
+    let mut modified = false;
+
+    // Load agents to identify human operators — their work quality isn't
+    // a reflection of a role+motivation prompt so we skip auto-evaluation.
+    let agents_dir = dir.join("agency").join("agents");
+    let all_agents = agency::load_all_agents_or_warn(&agents_dir);
+    let human_agent_ids: std::collections::HashSet<&str> = all_agents
+        .iter()
+        .filter(|a| a.is_human())
+        .map(|a| a.id.as_str())
+        .collect();
+
+    // Collect all tasks (not just ready ones) that might need eval tasks.
+    // We iterate all non-terminal tasks so eval tasks are created early.
+    let tasks_needing_eval: Vec<_> = graph
+        .tasks()
+        .filter(|t| {
+            // Skip tasks that already have an evaluation task
+            let eval_id = format!("evaluate-{}", t.id);
+            if graph.get_task(&eval_id).is_some() {
+                return false;
+            }
+            // Skip tasks tagged with evaluation/assignment/evolution
+            let dominated_tags = ["evaluation", "assignment", "evolution"];
+            if t.tags
                 .iter()
                 .any(|tag| dominated_tags.contains(&tag.as_str()))
             {
-                continue;
+                return false;
             }
-
-            let assign_task_id = format!("assign-{}", task_id);
-
-            // Skip if assignment task already exists (idempotent)
-            if graph.get_task(&assign_task_id).is_some() {
-                continue;
-            }
-
-            // Build description for the assigner with the original task's context
-            let mut desc = format!(
-                "Assign an agent to task '{}'.\n\n## Original Task\n**Title:** {}\n",
-                task_id, task_title,
-            );
-            if let Some(ref d) = task_desc {
-                desc.push_str(&format!("**Description:** {}\n", d));
-            }
-            if !task_skills.is_empty() {
-                desc.push_str(&format!("**Skills:** {}\n", task_skills.join(", ")));
-            }
-            desc.push_str(&format!(
-                "\n## Instructions\n\n\
-                 Pick the best agent for this task and assign them.\n\n\
-                 ### Step 1: Gather Information\n\n\
-                 Run these commands to understand the available agents and their track records:\n\
-                 ```\n\
-                 wg agent list --json\n\
-                 wg role list --json\n\
-                 wg motivation list --json\n\
-                 ```\n\n\
-                 For agents with evaluation history, drill into performance details:\n\
-                 ```\n\
-                 wg agent performance <agent-hash> --json\n\
-                 ```\n\n\
-                 ### Step 2: Match Agent to Task\n\n\
-                 Compare each agent's capabilities to the task requirements:\n\n\
-                 1. **Role fit**: The agent's role skills should overlap with the task's \
-                 required skills. A Programmer (code-writing, testing, debugging) fits \
-                 implementation tasks; a Reviewer (code-review, security-audit) fits review \
-                 tasks; an Architect (system-design, dependency-analysis) fits design tasks; \
-                 a Documenter (technical-writing) fits documentation tasks.\n\n\
-                 2. **Motivation fit**: The agent's operational parameters should match the \
-                 task's nature. A Careful agent suits tasks where correctness is critical. \
-                 A Fast agent suits urgent, low-risk tasks. A Thorough agent suits complex \
-                 tasks requiring deep analysis.\n\n\
-                 3. **Capabilities**: Check the agent's `capabilities` list for specific \
-                 technology or domain tags that match the task (e.g., \"rust\", \"python\", \
-                 \"kubernetes\").\n\n\
-                 ### Step 3: Use Performance Data\n\n\
-                 Each agent has a `performance` record with `task_count`, `avg_score` \
-                 (0.0–1.0), and individual evaluation entries. Each evaluation has \
-                 dimension scores: `correctness` (40% weight), `completeness` (30%), \
-                 `efficiency` (15%), `style_adherence` (15%).\n\n\
-                 - **Prefer agents with higher avg_score** on similar tasks (check \
-                 evaluation `task_id` and `context_id` to see what kinds of work they've \
-                 done before).\n\
-                 - **Weight recent evaluations more** — an agent's latest scores are more \
-                 predictive than older ones.\n\
-                 - **Consider dimension strengths**: If the task demands correctness above \
-                 all else, prefer agents who score highest on `correctness` even if their \
-                 overall average is slightly lower.\n\n\
-                 ### Step 4: Handle Cold Start\n\n\
-                 When agents have 0 evaluations (new agency, or new agents), you cannot \
-                 rely on performance data. In this case:\n\n\
-                 - **Match on role and motivation** — this is the primary signal. Pick the \
-                 agent whose role skills best cover the task requirements.\n\
-                 - **Spread work across untested agents** to build evaluation data. If \
-                 multiple agents have 0 evaluations and similar role fit, prefer whichever \
-                 has completed fewer tasks (lower `task_count`) so the agency gathers \
-                 diverse signal.\n\
-                 - **Default to Careful motivation** for high-stakes tasks and Fast \
-                 motivation for routine work when there's no data to differentiate.\n\n\
-                 ### Step 5: Balance Exploration vs Exploitation\n\n\
-                 - **Exploitation (default)**: Assign the highest-scoring agent whose \
-                 skills match. This maximizes expected quality.\n\
-                 - **Exploration**: Occasionally assign a less-proven agent to gather new \
-                 performance data. Do this when:\n\
-                   - A newer agent (higher generation, or fewer evaluations) has relevant \
-                 skills but limited history.\n\
-                   - The top performer's score advantage is small (< 0.1 difference).\n\
-                   - The task is lower-risk (not blocking many other tasks, not tagged as \
-                 critical).\n\
-                 - **Never explore with agents whose avg_score is below 0.4** — that \
-                 signals consistent poor performance.\n\n\
-                 ### Step 6: Assign\n\n\
-                 Once you've chosen an agent, run:\n\
-                 ```\n\
-                 wg assign {} <agent-hash>\n\
-                 wg done {}\n\
-                 ```\n\n\
-                 If no suitable agent exists for this task, report why:\n\
-                 ```\n\
-                 wg fail {} --reason \"No agent with matching skills for: <explanation>\"\n\
-                 ```",
-                task_id, assign_task_id, assign_task_id,
-            ));
-
-            // Create the assignment task (blocks the original)
-            let assign_task = Task {
-                id: assign_task_id.clone(),
-                title: format!("Assign agent for: {}", task_title),
-                description: Some(desc),
-                status: Status::Open,
-                assigned: None,
-                estimate: None,
-                blocks: vec![task_id.clone()],
-                blocked_by: vec![],
-                requires: vec![],
-                tags: vec!["assignment".to_string(), "agency".to_string()],
-                skills: vec![],
-                inputs: vec![],
-                deliverables: vec![],
-                artifacts: vec![],
-                exec: None,
-                not_before: None,
-                created_at: Some(Utc::now().to_rfc3339()),
-                started_at: None,
-                completed_at: None,
-                log: vec![],
-                retry_count: 0,
-                max_retries: None,
-                failure_reason: None,
-                model: config.agency.assigner_model.clone(),
-                verify: None,
-                agent: config.agency.assigner_agent.clone(),
-                loops_to: vec![],
-                loop_iteration: 0,
-                ready_after: None,
-                paused: false,
-            };
-
-            graph.add_node(Node::Task(assign_task));
-
-            // Add the assignment task as a blocker on the original task
-            if let Some(t) = graph.get_task_mut(&task_id)
-                && !t.blocked_by.contains(&assign_task_id)
+            // Skip tasks assigned to human agents
+            if let Some(ref agent_id) = t.agent
+                && human_agent_ids.contains(agent_id.as_str())
             {
-                t.blocked_by.push(assign_task_id.clone());
+                return false;
             }
+            // Only create for tasks that are active (Open, InProgress, Blocked)
+            // or already completed (Done, Failed) without an eval task
+            !matches!(t.status, Status::Abandoned)
+        })
+        .map(|t| (t.id.clone(), t.title.clone()))
+        .collect();
 
-            eprintln!(
-                "[coordinator] Created assignment task '{}' blocking '{}'",
-                assign_task_id, task_id,
-            );
-            graph_modified = true;
+    for (task_id, task_title) in &tasks_needing_eval {
+        let eval_task_id = format!("evaluate-{}", task_id);
+
+        // Double-check (the filter above already checks but graph may have changed)
+        if graph.get_task(&eval_task_id).is_some() {
+            continue;
         }
+
+        let desc = format!(
+            "Evaluate the completed task '{}'.\n\n\
+             Run `wg evaluate {}` to produce a structured evaluation.\n\
+             This reads the task output from `.workgraph/output/{}/` and \
+             the task definition via `wg show {}`.",
+            task_id, task_id, task_id, task_id,
+        );
+
+        let eval_task = Task {
+            id: eval_task_id.clone(),
+            title: format!("Evaluate: {}", task_title),
+            description: Some(desc),
+            status: Status::Open,
+            assigned: None,
+            estimate: None,
+            blocks: vec![],
+            blocked_by: vec![task_id.clone()],
+            requires: vec![],
+            tags: vec!["evaluation".to_string(), "agency".to_string()],
+            skills: vec![],
+            inputs: vec![],
+            deliverables: vec![],
+            artifacts: vec![],
+            exec: Some(format!("wg evaluate {}", task_id)),
+            not_before: None,
+            created_at: Some(Utc::now().to_rfc3339()),
+            started_at: None,
+            completed_at: None,
+            log: vec![],
+            retry_count: 0,
+            max_retries: None,
+            failure_reason: None,
+            model: config.agency.evaluator_model.clone(),
+            verify: None,
+            agent: config.agency.evaluator_agent.clone(),
+            loops_to: vec![],
+            loop_iteration: 0,
+            ready_after: None,
+            paused: false,
+        };
+
+        graph.add_node(Node::Task(eval_task));
+
+        eprintln!(
+            "[coordinator] Created evaluation task '{}' blocked by '{}'",
+            eval_task_id, task_id,
+        );
+        modified = true;
     }
 
-    // Auto-evaluate: create evaluation tasks for ready tasks.
-    //
-    // Per the agency design (§4.3), when auto_evaluate is enabled the coordinator
-    // creates an evaluation task `evaluate-{task-id}` that is blocked by the
-    // original task.  When the original task completes (done or failed),
-    // the evaluation task becomes ready and the coordinator spawns an
-    // evaluator agent on it.
-    //
-    // Tasks tagged "evaluation", "assignment", or "evolution" are NOT
-    // auto-evaluated to prevent infinite regress.  Abandoned tasks are also
-    // excluded.
-    if config.agency.auto_evaluate {
-        // Load agents to identify human operators — their work quality isn't
-        // a reflection of a role+motivation prompt so we skip auto-evaluation.
-        let agents_dir = dir.join("agency").join("agents");
-        let all_agents = agency::load_all_agents_or_warn(&agents_dir);
-        let human_agent_ids: std::collections::HashSet<&str> = all_agents
-            .iter()
-            .filter(|a| a.is_human())
-            .map(|a| a.id.as_str())
-            .collect();
-
-        // Collect all tasks (not just ready ones) that might need eval tasks.
-        // We iterate all non-terminal tasks so eval tasks are created early.
-        let tasks_needing_eval: Vec<_> = graph
-            .tasks()
-            .filter(|t| {
-                // Skip tasks that already have an evaluation task
-                let eval_id = format!("evaluate-{}", t.id);
-                if graph.get_task(&eval_id).is_some() {
-                    return false;
-                }
-                // Skip tasks tagged with evaluation/assignment/evolution
-                let dominated_tags = ["evaluation", "assignment", "evolution"];
-                if t.tags
-                    .iter()
-                    .any(|tag| dominated_tags.contains(&tag.as_str()))
+    // Unblock evaluation tasks whose source task has Failed.
+    // `ready_tasks()` only unblocks when the blocker is Done. For Failed
+    // tasks we still want evaluation to proceed (§4.3: "Failed tasks also
+    // get evaluated"), so we remove the blocker explicitly.
+    let eval_fixups: Vec<(String, String)> = graph
+        .tasks()
+        .filter(|t| t.id.starts_with("evaluate-") && t.status == Status::Open)
+        .filter_map(|t| {
+            // The eval task blocks on a single task: the original
+            if t.blocked_by.len() == 1 {
+                let source_id = &t.blocked_by[0];
+                if let Some(source) = graph.get_task(source_id)
+                    && source.status == Status::Failed
                 {
-                    return false;
+                    return Some((t.id.clone(), source_id.clone()));
                 }
-                // Skip tasks assigned to human agents
-                if let Some(ref agent_id) = t.agent
-                    && human_agent_ids.contains(agent_id.as_str())
-                {
-                    return false;
-                }
-                // Only create for tasks that are active (Open, InProgress, Blocked)
-                // or already completed (Done, Failed) without an eval task
-                !matches!(t.status, Status::Abandoned)
-            })
-            .map(|t| (t.id.clone(), t.title.clone()))
-            .collect();
-
-        for (task_id, task_title) in &tasks_needing_eval {
-            let eval_task_id = format!("evaluate-{}", task_id);
-
-            // Double-check (the filter above already checks but graph may have changed)
-            if graph.get_task(&eval_task_id).is_some() {
-                continue;
             }
+            None
+        })
+        .collect();
 
-            let desc = format!(
-                "Evaluate the completed task '{}'.\n\n\
-                 Run `wg evaluate {}` to produce a structured evaluation.\n\
-                 This reads the task output from `.workgraph/output/{}/` and \
-                 the task definition via `wg show {}`.",
-                task_id, task_id, task_id, task_id,
-            );
-
-            let eval_task = Task {
-                id: eval_task_id.clone(),
-                title: format!("Evaluate: {}", task_title),
-                description: Some(desc),
-                status: Status::Open,
-                assigned: None,
-                estimate: None,
-                blocks: vec![],
-                blocked_by: vec![task_id.clone()],
-                requires: vec![],
-                tags: vec!["evaluation".to_string(), "agency".to_string()],
-                skills: vec![],
-                inputs: vec![],
-                deliverables: vec![],
-                artifacts: vec![],
-                exec: Some(format!("wg evaluate {}", task_id)),
-                not_before: None,
-                created_at: Some(Utc::now().to_rfc3339()),
-                started_at: None,
-                completed_at: None,
-                log: vec![],
-                retry_count: 0,
-                max_retries: None,
-                failure_reason: None,
-                model: config.agency.evaluator_model.clone(),
-                verify: None,
-                agent: config.agency.evaluator_agent.clone(),
-                loops_to: vec![],
-                loop_iteration: 0,
-                ready_after: None,
-                paused: false,
-            };
-
-            graph.add_node(Node::Task(eval_task));
-
+    for (eval_id, source_id) in &eval_fixups {
+        if let Some(t) = graph.get_task_mut(eval_id) {
+            t.blocked_by.retain(|b| b != source_id);
+            modified = true;
             eprintln!(
-                "[coordinator] Created evaluation task '{}' blocked by '{}'",
-                eval_task_id, task_id,
+                "[coordinator] Unblocked evaluation task '{}' (source '{}' failed)",
+                eval_id, source_id,
             );
-            graph_modified = true;
-        }
-
-        // Unblock evaluation tasks whose source task has Failed.
-        // `ready_tasks()` only unblocks when the blocker is Done. For Failed
-        // tasks we still want evaluation to proceed (§4.3: "Failed tasks also
-        // get evaluated"), so we remove the blocker explicitly.
-        let eval_fixups: Vec<(String, String)> = graph
-            .tasks()
-            .filter(|t| t.id.starts_with("evaluate-") && t.status == Status::Open)
-            .filter_map(|t| {
-                // The eval task blocks on a single task: the original
-                if t.blocked_by.len() == 1 {
-                    let source_id = &t.blocked_by[0];
-                    if let Some(source) = graph.get_task(source_id)
-                        && source.status == Status::Failed
-                    {
-                        return Some((t.id.clone(), source_id.clone()));
-                    }
-                }
-                None
-            })
-            .collect();
-
-        for (eval_id, source_id) in &eval_fixups {
-            if let Some(t) = graph.get_task_mut(eval_id) {
-                t.blocked_by.retain(|b| b != source_id);
-                graph_modified = true;
-                eprintln!(
-                    "[coordinator] Unblocked evaluation task '{}' (source '{}' failed)",
-                    eval_id, source_id,
-                );
-            }
         }
     }
 
-    // Save graph once if it was modified during auto-assign or auto-evaluate.
-    // Abort tick if save fails — continuing with unsaved state would spawn agents
-    // on tasks that haven't been persisted.
-    if graph_modified {
-        save_graph(&graph, &graph_path)
-            .context("Failed to save graph after auto-assign/auto-evaluate; aborting tick")?;
-    }
+    modified
+}
 
-    // Get final ready tasks (recalculated if graph was modified)
-    let final_ready = ready_tasks(&graph);
-
-    // Spawn agents on ready tasks
-    let mut spawned = 0;
+/// Spawn agents on ready tasks, up to `slots_available`. Returns the number of
+/// agents successfully spawned.
+fn spawn_agents_for_ready_tasks(
+    dir: &Path,
+    graph: &workgraph::graph::WorkGraph,
+    executor: &str,
+    model: Option<&str>,
+    slots_available: usize,
+) -> usize {
+    let final_ready = ready_tasks(graph);
     let agents_dir = dir.join("agency").join("agents");
+    let mut spawned = 0;
+
     let to_spawn = final_ready.iter().take(slots_available);
     for task in to_spawn {
         // Skip if already claimed
@@ -787,9 +800,64 @@ pub fn coordinator_tick(
         }
     }
 
+    spawned
+}
+
+/// Single coordinator tick: spawn agents on ready tasks
+pub fn coordinator_tick(
+    dir: &Path,
+    max_agents: usize,
+    executor: &str,
+    model: Option<&str>,
+) -> Result<TickResult> {
+    let graph_path = graph_path(dir);
+
+    // Load config for agency settings
+    let config = Config::load_or_default(dir);
+
+    // Phase 1: Clean up dead agents and count alive ones
+    let alive_count = match cleanup_and_count_alive(dir, &graph_path, max_agents)? {
+        Ok(count) => count,
+        Err(early_result) => return Ok(early_result),
+    };
+
+    // Phase 2: Load graph and check for ready tasks
+    let mut graph = load_graph(&graph_path).context("Failed to load graph")?;
+
+    if let Some(early_result) = check_ready_or_return(&graph, alive_count) {
+        return Ok(early_result);
+    }
+
+    let slots_available = max_agents.saturating_sub(alive_count);
+
+    // Phase 3: Auto-assign unassigned ready tasks
+    let mut graph_modified = false;
+    if config.agency.auto_assign {
+        graph_modified |= build_auto_assign_tasks(&mut graph, &config);
+    }
+
+    // Phase 4: Auto-evaluate tasks
+    if config.agency.auto_evaluate {
+        graph_modified |= build_auto_evaluate_tasks(dir, &mut graph, &config);
+    }
+
+    // Save graph once if it was modified during auto-assign or auto-evaluate.
+    // Abort tick if save fails — continuing with unsaved state would spawn agents
+    // on tasks that haven't been persisted.
+    if graph_modified {
+        save_graph(&graph, &graph_path)
+            .context("Failed to save graph after auto-assign/auto-evaluate; aborting tick")?;
+    }
+
+    // Phase 5: Spawn agents on ready tasks
+    let final_ready = ready_tasks(&graph);
+    let ready_count = final_ready.len();
+    drop(final_ready);
+    let spawned = spawn_agents_for_ready_tasks(dir, &graph, executor, model, slots_available);
+
     Ok(TickResult {
         agents_alive: alive_count + spawned,
-        tasks_ready: final_ready.len(),
+        tasks_ready: ready_count,
         agents_spawned: spawned,
     })
 }

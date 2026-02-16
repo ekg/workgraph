@@ -131,7 +131,7 @@ impl Status {
 /// Custom `Deserialize` handles migration from the old `identity` field
 /// (`{"role_id": "...", "motivation_id": "..."}`) to the new `agent` field
 /// (content-hash string).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct Task {
     pub id: String,
     pub title: String,
@@ -339,43 +339,6 @@ impl<'de> Deserialize<'de> for Task {
             ready_after: helper.ready_after,
             paused: helper.paused,
         })
-    }
-}
-
-impl Default for Task {
-    fn default() -> Self {
-        Task {
-            id: String::new(),
-            title: String::new(),
-            description: None,
-            status: Status::default(),
-            assigned: None,
-            estimate: None,
-            blocks: Vec::new(),
-            blocked_by: Vec::new(),
-            requires: Vec::new(),
-            tags: Vec::new(),
-            skills: Vec::new(),
-            inputs: Vec::new(),
-            deliverables: Vec::new(),
-            artifacts: Vec::new(),
-            exec: None,
-            not_before: None,
-            created_at: None,
-            started_at: None,
-            completed_at: None,
-            log: Vec::new(),
-            retry_count: 0,
-            max_retries: None,
-            failure_reason: None,
-            model: None,
-            verify: None,
-            agent: None,
-            loops_to: Vec::new(),
-            loop_iteration: 0,
-            ready_after: None,
-            paused: false,
-        }
     }
 }
 

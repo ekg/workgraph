@@ -33,41 +33,14 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
-    use workgraph::graph::{Estimate, Node, Status, Task, WorkGraph};
+    use workgraph::graph::{Estimate, Node, Task, WorkGraph};
     use workgraph::parser::save_graph;
 
     fn make_task(id: &str, title: &str) -> Task {
         Task {
             id: id.to_string(),
             title: title.to_string(),
-            description: None,
-            status: Status::Open,
-            assigned: None,
-            estimate: None,
-            blocks: vec![],
-            blocked_by: vec![],
-            requires: vec![],
-            tags: vec![],
-            skills: vec![],
-            inputs: vec![],
-            deliverables: vec![],
-            artifacts: vec![],
-            exec: None,
-            not_before: None,
-            created_at: None,
-            started_at: None,
-            completed_at: None,
-            log: vec![],
-            retry_count: 0,
-            max_retries: None,
-            failure_reason: None,
-            model: None,
-            verify: None,
-            agent: None,
-            loops_to: vec![],
-            loop_iteration: 0,
-            ready_after: None,
-            paused: false,
+            ..Task::default()
         }
     }
 

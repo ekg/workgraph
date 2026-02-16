@@ -7,6 +7,7 @@ pub struct CheckResult {
     pub cycles: Vec<Vec<String>>,
     pub orphan_refs: Vec<OrphanRef>,
     pub loop_edge_issues: Vec<LoopEdgeIssue>,
+    pub stale_assignments: Vec<StaleAssignment>,
     pub ok: bool,
 }
 
@@ -16,6 +17,13 @@ pub struct OrphanRef {
     pub from: String,
     pub to: String,
     pub relation: String,
+}
+
+/// A task with status=open but an agent assigned (may indicate a dead agent)
+#[derive(Debug, Clone)]
+pub struct StaleAssignment {
+    pub task_id: String,
+    pub assigned: String,
 }
 
 /// An issue with a loop edge
@@ -150,6 +158,24 @@ pub fn check_loop_edges(graph: &WorkGraph) -> Vec<LoopEdgeIssue> {
     issues
 }
 
+/// Check for tasks with status=open but an agent assigned (stale assignments)
+pub fn check_stale_assignments(graph: &WorkGraph) -> Vec<StaleAssignment> {
+    let mut stale = Vec::new();
+
+    for task in graph.tasks() {
+        if task.status == crate::graph::Status::Open
+            && let Some(assigned) = &task.assigned
+        {
+            stale.push(StaleAssignment {
+                task_id: task.id.clone(),
+                assigned: assigned.clone(),
+            });
+        }
+    }
+
+    stale
+}
+
 /// Check for references to non-existent nodes
 pub fn check_orphans(graph: &WorkGraph) -> Vec<OrphanRef> {
     let mut orphans = Vec::new();
@@ -194,15 +220,17 @@ pub fn check_all(graph: &WorkGraph) -> CheckResult {
     let cycles = check_cycles(graph);
     let orphan_refs = check_orphans(graph);
     let loop_edge_issues = check_loop_edges(graph);
+    let stale_assignments = check_stale_assignments(graph);
 
-    // Cycles are warnings, not errors — only orphan refs and loop edge issues
-    // make the graph invalid
+    // Cycles and stale assignments are warnings, not errors — only orphan refs
+    // and loop edge issues make the graph invalid
     let ok = orphan_refs.is_empty() && loop_edge_issues.is_empty();
 
     CheckResult {
         cycles,
         orphan_refs,
         loop_edge_issues,
+        stale_assignments,
         ok,
     }
 }
@@ -216,34 +244,7 @@ mod tests {
         Task {
             id: id.to_string(),
             title: title.to_string(),
-            description: None,
-            status: Status::Open,
-            assigned: None,
-            estimate: None,
-            blocks: vec![],
-            blocked_by: vec![],
-            requires: vec![],
-            tags: vec![],
-            skills: vec![],
-            inputs: vec![],
-            deliverables: vec![],
-            artifacts: vec![],
-            exec: None,
-            not_before: None,
-            created_at: None,
-            started_at: None,
-            completed_at: None,
-            log: vec![],
-            retry_count: 0,
-            max_retries: None,
-            failure_reason: None,
-            model: None,
-            verify: None,
-            agent: None,
-            loops_to: vec![],
-            loop_iteration: 0,
-            ready_after: None,
-            paused: false,
+            ..Task::default()
         }
     }
 
@@ -783,5 +784,72 @@ mod tests {
 
         let issues = check_loop_edges(&graph);
         assert!(issues.is_empty());
+    }
+
+    // --- Stale assignment tests ---
+
+    #[test]
+    fn test_no_stale_assignments_in_empty_graph() {
+        let graph = WorkGraph::new();
+        let stale = check_stale_assignments(&graph);
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn test_no_stale_when_open_and_unassigned() {
+        let mut graph = WorkGraph::new();
+        graph.add_node(Node::Task(make_task("t1", "Task 1")));
+        let stale = check_stale_assignments(&graph);
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn test_stale_when_open_and_assigned() {
+        let mut graph = WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.assigned = Some("agent-abc".to_string());
+        graph.add_node(Node::Task(t1));
+
+        let stale = check_stale_assignments(&graph);
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].task_id, "t1");
+        assert_eq!(stale[0].assigned, "agent-abc");
+    }
+
+    #[test]
+    fn test_no_stale_when_in_progress_and_assigned() {
+        let mut graph = WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.status = Status::InProgress;
+        t1.assigned = Some("agent-abc".to_string());
+        graph.add_node(Node::Task(t1));
+
+        let stale = check_stale_assignments(&graph);
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn test_no_stale_when_done_and_assigned() {
+        let mut graph = WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.status = Status::Done;
+        t1.assigned = Some("agent-abc".to_string());
+        graph.add_node(Node::Task(t1));
+
+        let stale = check_stale_assignments(&graph);
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn test_stale_assignments_are_warnings_not_errors() {
+        let mut graph = WorkGraph::new();
+        let mut t1 = make_task("t1", "Task 1");
+        t1.assigned = Some("agent-abc".to_string());
+        graph.add_node(Node::Task(t1));
+
+        let result = check_all(&graph);
+        assert!(!result.stale_assignments.is_empty());
+        // Stale assignments should not make the graph invalid
+        assert!(result.ok);
     }
 }

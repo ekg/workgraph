@@ -414,9 +414,14 @@ fn test_fallback_poll_pickup() {
         task_status(&wg_dir, "poll-task")
     );
 
-    // Verify coordinator ticks progressed (should have ticked multiple times)
+    // Verify coordinator ticks progressed (should have ticked multiple times).
+    // Use a wait_for loop because under load the second tick may not have
+    // completed by the time the task is first picked up.
+    let ticks_ok = wait_for(Duration::from_secs(10), 300, || {
+        coordinator_ticks(&wg_dir) >= 2
+    });
     assert!(
-        coordinator_ticks(&wg_dir) >= 2,
+        ticks_ok,
         "Coordinator should have ticked at least twice (initial + poll). Ticks: {}",
         coordinator_ticks(&wg_dir)
     );

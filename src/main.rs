@@ -1,3 +1,5 @@
+#![warn(clippy::redundant_closure)]
+
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use std::path::{Path, PathBuf};
