@@ -120,6 +120,24 @@ wg loops                    # List all loop edges and status
 wg show <task-id>           # See loop_iteration and loop edges
 ```
 
+### Pausing and resuming loops
+
+To temporarily stop a looping task without losing its iteration count or loop edges:
+
+```bash
+wg pause <task-id>          # Coordinator skips this task until resumed
+wg resume <task-id>         # Task becomes dispatchable again
+```
+
+Paused tasks keep their status, loop edges, and iteration count intact. `wg show` displays "(PAUSED)" and `wg list` shows "[PAUSED]".
+
+To pause/resume the entire coordinator (all dispatching stops, running agents continue):
+
+```bash
+wg service pause            # No new agents spawned
+wg service resume           # Resume dispatching
+```
+
 ## Full command reference
 
 ### Task creation & editing
@@ -151,6 +169,8 @@ wg show <task-id>           # See loop_iteration and loop edges
 | `wg claim <id>` | Claim task (in-progress) |
 | `wg unclaim <id>` | Release claimed task (back to open) |
 | `wg done <id>` | Complete task |
+| `wg pause <id>` | Pause task (coordinator skips it) |
+| `wg resume <id>` | Resume a paused task |
 | `wg fail <id> --reason "why"` | Mark task failed |
 | `wg retry <id>` | Retry failed task |
 | `wg abandon <id> --reason "why"` | Abandon permanently |
@@ -212,6 +232,8 @@ wg show <task-id>           # See loop_iteration and loop edges
 | `wg service start` | Start coordinator daemon |
 | `wg service start --max-agents 5` | Start with parallelism limit |
 | `wg service stop` | Stop daemon |
+| `wg service pause` | Pause coordinator (running agents continue, no new spawns) |
+| `wg service resume` | Resume coordinator dispatching |
 | `wg service status` | Check daemon health |
 | `wg agents` | List all agents |
 | `wg agents --alive` | Only alive agents |
