@@ -251,6 +251,8 @@ wg service resume           # Resume dispatching
 
 | Command | Purpose |
 |---------|---------|
+| `wg agency init` | Bootstrap agency with starter roles, motivations, and agents |
+| `wg agency stats` | Performance analytics |
 | `wg role add <id>` | Create a role |
 | `wg role list` | List roles |
 | `wg role show <id>` | Show role details |
@@ -272,7 +274,6 @@ wg service resume           # Resume dispatching
 | `wg evaluate <task>` | Trigger task evaluation |
 | `wg evolve` | Trigger evolution cycle |
 | `wg evolve --strategy mutation --budget 3` | Targeted evolution |
-| `wg agency stats` | Performance analytics |
 
 ### Artifacts & resources
 
