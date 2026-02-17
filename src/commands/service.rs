@@ -1613,18 +1613,18 @@ pub fn run_start(
                 }
                 // Send shutdown via IPC first (graceful)
                 let socket = PathBuf::from(&state.socket_path);
-                if socket.exists() {
-                    if let Ok(mut stream) = UnixStream::connect(&socket) {
-                        let request = IpcRequest::Shutdown {
-                            force: false,
-                            kill_agents: false,
-                        };
-                        if let Ok(json_req) = serde_json::to_string(&request) {
-                            let _ = writeln!(stream, "{}", json_req);
-                            let _ = stream.flush();
-                        }
-                        std::thread::sleep(Duration::from_millis(200));
+                if socket.exists()
+                    && let Ok(mut stream) = UnixStream::connect(&socket)
+                {
+                    let request = IpcRequest::Shutdown {
+                        force: false,
+                        kill_agents: false,
+                    };
+                    if let Ok(json_req) = serde_json::to_string(&request) {
+                        let _ = writeln!(stream, "{}", json_req);
+                        let _ = stream.flush();
                     }
+                    std::thread::sleep(Duration::from_millis(200));
                 }
                 // If still alive, kill it
                 if is_process_running(state.pid) {
