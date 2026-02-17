@@ -2526,20 +2526,18 @@ pub fn run_stop(dir: &Path, force: bool, kill_agents: bool, json: bool) -> Resul
             "orphans_killed": orphan_count,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if orphan_count > 0 {
+        println!(
+            "Service stopped (PID {}), killed {} orphan daemon(s)",
+            state.pid, orphan_count
+        );
+    } else if kill_agents {
+        println!("Service stopped (PID {}), agents killed", state.pid);
     } else {
-        if orphan_count > 0 {
-            println!(
-                "Service stopped (PID {}), killed {} orphan daemon(s)",
-                state.pid, orphan_count
-            );
-        } else if kill_agents {
-            println!("Service stopped (PID {}), agents killed", state.pid);
-        } else {
-            println!(
-                "Service stopped (PID {}), agents continue running",
-                state.pid
-            );
-        }
+        println!(
+            "Service stopped (PID {}), agents continue running",
+            state.pid
+        );
     }
 
     Ok(())
