@@ -253,6 +253,8 @@ wg service resume           # Resume dispatching
 |---------|---------|
 | `wg agency init` | Bootstrap agency with starter roles, motivations, and agents |
 | `wg agency stats` | Performance analytics |
+| `wg agency stats --by-model` | Per-model score breakdown |
+| `wg models` | List known models and usage stats |
 | `wg role add <id>` | Create a role |
 | `wg role list` | List roles |
 | `wg role show <id>` | Show role details |
@@ -290,6 +292,7 @@ wg service resume           # Resume dispatching
 
 | Command | Purpose |
 |---------|---------|
+| `wg gc` | Remove terminal tasks (done/abandoned/failed) from the graph |
 | `wg archive` | Archive completed tasks |
 | `wg archive --dry-run` | Preview what would be archived |
 | `wg archive --older 30d` | Only archive old completions |
