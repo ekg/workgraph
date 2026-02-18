@@ -2968,6 +2968,7 @@ Let me know if you'd like me to adjust anything."#;
                 notes: "Good".into(),
                 evaluator: "human".into(),
                 timestamp: "2025-01-01T00:00:00Z".into(),
+                model: None,
             },
             Evaluation {
                 id: "e2".into(),
@@ -2980,6 +2981,7 @@ Let me know if you'd like me to adjust anything."#;
                 notes: "OK".into(),
                 evaluator: "human".into(),
                 timestamp: "2025-01-02T00:00:00Z".into(),
+                model: None,
             },
             Evaluation {
                 id: "e3".into(),
@@ -2992,6 +2994,7 @@ Let me know if you'd like me to adjust anything."#;
                 notes: "Great".into(),
                 evaluator: "human".into(),
                 timestamp: "2025-01-03T00:00:00Z".into(),
+                model: None,
             },
         ];
 

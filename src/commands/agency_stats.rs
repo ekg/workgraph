@@ -661,6 +661,7 @@ mod tests {
                 notes: String::new(),
                 evaluator: "test".into(),
                 timestamp: "2025-01-01T00:00:00Z".into(),
+                model: None,
             },
             Evaluation {
                 id: "e2".into(),
@@ -673,6 +674,7 @@ mod tests {
                 notes: String::new(),
                 evaluator: "test".into(),
                 timestamp: "2025-01-02T00:00:00Z".into(),
+                model: None,
             },
         ];
 
@@ -733,6 +735,7 @@ mod tests {
             notes: String::new(),
             evaluator: "test".into(),
             timestamp: "2025-01-01T00:00:00Z".into(),
+            model: None,
         }];
         let mut tags = HashMap::new();
         tags.insert("t1".to_string(), vec!["cli".to_string()]);

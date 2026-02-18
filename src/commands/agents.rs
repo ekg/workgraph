@@ -316,6 +316,7 @@ mod tests {
             last_heartbeat: chrono::Utc::now().to_rfc3339(),
             status: AgentStatus::Working,
             output_file: "/tmp/test.log".to_string(),
+            model: None,
         };
 
         let status = effective_status(&agent);
@@ -337,6 +338,7 @@ mod tests {
             last_heartbeat: chrono::Utc::now().to_rfc3339(),
             status: AgentStatus::Dead,
             output_file: "/tmp/test.log".to_string(),
+            model: None,
         };
 
         let status = effective_status(&agent);
@@ -357,6 +359,7 @@ mod tests {
             last_heartbeat: chrono::Utc::now().to_rfc3339(),
             status: AgentStatus::Working,
             output_file: "/tmp/test.log".to_string(),
+            model: None,
         };
 
         let status = effective_status(&agent);

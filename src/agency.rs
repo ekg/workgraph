@@ -1748,6 +1748,7 @@ mod tests {
             notes: "Good implementation with minor style issues.".into(),
             evaluator: "reviewer-bot".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
+            model: None,
         }
     }
 
@@ -2483,6 +2484,7 @@ performance:
             notes: "Good work".into(),
             evaluator: "test".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
+            model: None,
         };
 
         let eval_path = record_evaluation(&eval, &agency_dir).unwrap();
@@ -2543,6 +2545,7 @@ performance:
             notes: "".into(),
             evaluator: "test".into(),
             timestamp: "2025-05-01T10:00:00Z".into(),
+            model: None,
         };
 
         let eval2 = Evaluation {
@@ -2556,6 +2559,7 @@ performance:
             notes: "".into(),
             evaluator: "test".into(),
             timestamp: "2025-05-01T11:00:00Z".into(),
+            model: None,
         };
 
         record_evaluation(&eval1, &agency_dir).unwrap();
@@ -2596,6 +2600,7 @@ performance:
             notes: "".into(),
             evaluator: "test".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
+            model: None,
         };
 
         let result = record_evaluation(&eval, &agency_dir);

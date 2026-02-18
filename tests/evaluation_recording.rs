@@ -119,6 +119,7 @@ impl TestFixture {
             notes: format!("Test eval {}", id),
             evaluator: "test-harness".to_string(),
             timestamp: "2025-06-01T12:00:00Z".to_string(),
+            model: None,
         }
     }
 }
@@ -149,6 +150,7 @@ fn test_record_evaluation_json_format() {
         notes: "Testing JSON format preservation.".to_string(),
         evaluator: "human-reviewer".to_string(),
         timestamp: "2025-06-15T14:30:00Z".to_string(),
+        model: None,
     };
 
     let eval_path = agency::record_evaluation(&eval, &fix.agency_dir).unwrap();
@@ -248,6 +250,7 @@ fn test_multiple_evaluations_same_agent_avg() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T10:00:00Z".to_string(),
+        model: None,
     };
     let eval2 = Evaluation {
         id: "e2".to_string(),
@@ -260,6 +263,7 @@ fn test_multiple_evaluations_same_agent_avg() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T11:00:00Z".to_string(),
+        model: None,
     };
 
     agency::record_evaluation(&eval1, &fix.agency_dir).unwrap();
@@ -299,6 +303,7 @@ fn test_three_evaluations_incremental_avg() {
             notes: String::new(),
             evaluator: "test".to_string(),
             timestamp: format!("2025-06-01T{}:00:00Z", 10 + i),
+            model: None,
         };
         agency::record_evaluation(&eval, &fix.agency_dir).unwrap();
     }
@@ -337,6 +342,7 @@ fn test_context_ids_tracked_independently() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T12:00:00Z".to_string(),
+        model: None,
     };
     agency::record_evaluation(&eval, &fix.agency_dir).unwrap();
 
@@ -401,6 +407,7 @@ fn test_role_tracks_different_motivation_context_ids() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T10:00:00Z".to_string(),
+        model: None,
     };
     agency::record_evaluation(&eval_a, &agency_dir).unwrap();
 
@@ -416,6 +423,7 @@ fn test_role_tracks_different_motivation_context_ids() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T11:00:00Z".to_string(),
+        model: None,
     };
     agency::record_evaluation(&eval_b, &agency_dir).unwrap();
 
@@ -459,6 +467,7 @@ fn test_motivation_tracks_different_role_context_ids() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T10:00:00Z".to_string(),
+        model: None,
     };
     let eval_b = Evaluation {
         id: "e-rb".to_string(),
@@ -471,6 +480,7 @@ fn test_motivation_tracks_different_role_context_ids() {
         notes: String::new(),
         evaluator: "test".to_string(),
         timestamp: "2025-06-01T11:00:00Z".to_string(),
+        model: None,
     };
 
     agency::record_evaluation(&eval_a, &agency_dir).unwrap();
@@ -614,6 +624,7 @@ fn test_twelve_evaluations_end_to_end() {
             notes: String::new(),
             evaluator: "test".to_string(),
             timestamp: format!("2025-06-{:02}T10:00:00Z", i + 1),
+            model: None,
         };
         agency::record_evaluation(&eval, &fix.agency_dir).unwrap();
     }
