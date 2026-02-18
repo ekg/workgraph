@@ -214,6 +214,9 @@ pub struct Evaluation {
     pub notes: String,
     pub evaluator: String,
     pub timestamp: String,
+    /// Model used by the agent for this task (e.g., "anthropic/claude-opus-4-6")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Expand `~` at the start of a path to the user's home directory.

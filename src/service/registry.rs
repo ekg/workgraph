@@ -59,6 +59,9 @@ pub struct AgentEntry {
     pub status: AgentStatus,
     /// Path to the agent's output log file
     pub output_file: String,
+    /// Model used for this agent (e.g., "anthropic/claude-opus-4-6")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl AgentEntry {
@@ -275,6 +278,18 @@ impl AgentRegistry {
         executor: &str,
         output_file: &str,
     ) -> String {
+        self.register_agent_with_model(pid, task_id, executor, output_file, None)
+    }
+
+    /// Register a new agent with an optional model, returning the assigned agent ID
+    pub fn register_agent_with_model(
+        &mut self,
+        pid: u32,
+        task_id: &str,
+        executor: &str,
+        output_file: &str,
+        model: Option<&str>,
+    ) -> String {
         let agent_id = format!("agent-{}", self.next_agent_id);
         self.next_agent_id = self.next_agent_id.saturating_add(1);
 
@@ -289,6 +304,7 @@ impl AgentRegistry {
             last_heartbeat: now,
             status: AgentStatus::Working,
             output_file: output_file.to_string(),
+            model: model.map(std::string::ToString::to_string),
         };
 
         self.agents.insert(agent_id.clone(), entry);
