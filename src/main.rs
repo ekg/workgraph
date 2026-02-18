@@ -1883,9 +1883,7 @@ fn main() -> Result<()> {
             AgencyCommands::Stats {
                 min_evals,
                 by_model,
-            } => {
-                commands::agency_stats::run(&workgraph_dir, cli.json, min_evals, by_model)
-            }
+            } => commands::agency_stats::run(&workgraph_dir, cli.json, min_evals, by_model),
         },
         Commands::Role { command } => match command {
             RoleCommands::Add {

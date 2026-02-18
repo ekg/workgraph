@@ -211,11 +211,7 @@ fn build_tag_breakdown(
 fn build_model_stats(evaluations: &[Evaluation]) -> Vec<ModelStats> {
     let mut map: HashMap<String, Vec<f64>> = HashMap::new();
     for eval in evaluations {
-        let model_key = eval
-            .model
-            .as_deref()
-            .unwrap_or("(unknown)")
-            .to_string();
+        let model_key = eval.model.as_deref().unwrap_or("(unknown)").to_string();
         map.entry(model_key).or_default().push(eval.score);
     }
     let mut stats: Vec<ModelStats> = map
@@ -457,7 +453,10 @@ fn output_text(
         for s in &model_stats {
             println!(
                 "  {:<40} {:>8.2} {:>6} {:>6}",
-                s.model, s.avg_score, s.count, trend(&s.scores),
+                s.model,
+                s.avg_score,
+                s.count,
+                trend(&s.scores),
             );
         }
     }
@@ -586,7 +585,7 @@ fn output_json(
         })
         .collect();
 
-    let output = serde_json::json!({
+    let mut output = serde_json::json!({
         "overview": {
             "total_roles": roles.len(),
             "total_motivations": motivations.len(),
@@ -602,6 +601,22 @@ fn output_json(
         },
         "underexplored": under_json,
     });
+
+    if by_model {
+        let model_stats = build_model_stats(evaluations);
+        let model_board: Vec<serde_json::Value> = model_stats
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "model": s.model,
+                    "avg_score": s.avg_score,
+                    "eval_count": s.count,
+                    "trend": trend(&s.scores),
+                })
+            })
+            .collect();
+        output["model_leaderboard"] = serde_json::json!(model_board);
+    }
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())

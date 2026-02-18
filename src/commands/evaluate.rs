@@ -17,13 +17,13 @@ use workgraph::parser::load_graph;
 /// Returns the model string if found.
 fn extract_spawn_model(log: &[LogEntry]) -> Option<String> {
     for entry in log {
-        if let Some(rest) = entry.message.strip_prefix("Spawned by ") {
-            if let Some(idx) = rest.find("--model ") {
-                let model_start = idx + "--model ".len();
-                let model = rest[model_start..].trim();
-                if !model.is_empty() {
-                    return Some(model.to_string());
-                }
+        if let Some(rest) = entry.message.strip_prefix("Spawned by ")
+            && let Some(idx) = rest.find("--model ")
+        {
+            let model_start = idx + "--model ".len();
+            let model = rest[model_start..].trim();
+            if !model.is_empty() {
+                return Some(model.to_string());
             }
         }
     }
