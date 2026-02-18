@@ -22,6 +22,7 @@ pub struct TemplateVars {
     pub task_identity: String,
     pub working_dir: String,
     pub skills_preamble: String,
+    pub model: String,
 }
 
 impl TemplateVars {
@@ -53,6 +54,7 @@ impl TemplateVars {
             task_identity,
             working_dir,
             skills_preamble,
+            model: task.model.clone().unwrap_or_default(),
         }
     }
 
@@ -177,6 +179,7 @@ impl TemplateVars {
             .replace("{{task_identity}}", &self.task_identity)
             .replace("{{working_dir}}", &self.working_dir)
             .replace("{{skills_preamble}}", &self.skills_preamble)
+            .replace("{{model}}", &self.model)
     }
 }
 
@@ -216,6 +219,12 @@ pub struct ExecutorSettings {
     /// Timeout in seconds (optional).
     #[serde(default)]
     pub timeout: Option<u64>,
+
+    /// Default model for this executor.
+    /// Overrides coordinator.model but is overridden by task.model.
+    /// Hierarchy: task.model > executor.model > coordinator.model > 'default'.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Prompt template for injecting task context.
@@ -383,6 +392,7 @@ Begin working on the task now."#.to_string(),
                     }),
                     working_dir: Some("{{working_dir}}".to_string()),
                     timeout: None,
+                    model: None,
                 },
             }),
             "shell" => Ok(ExecutorConfig {
@@ -399,6 +409,7 @@ Begin working on the task now."#.to_string(),
                     prompt_template: None,
                     working_dir: None,
                     timeout: None,
+                    model: None,
                 },
             }),
             "default" => Ok(ExecutorConfig {
@@ -410,6 +421,7 @@ Begin working on the task now."#.to_string(),
                     prompt_template: None,
                     working_dir: None,
                     timeout: None,
+                    model: None,
                 },
             }),
             _ => Err(anyhow!(
@@ -554,6 +566,7 @@ template = "Work on {{task_id}}"
                 }),
                 working_dir: Some("/work/{{task_id}}".to_string()),
                 timeout: None,
+                model: None,
             },
         };
 
@@ -1020,6 +1033,7 @@ args = ["--custom-flag"]
                 prompt_template: None,
                 working_dir: None,
                 timeout: None,
+                model: None,
             },
         };
 
@@ -1042,6 +1056,7 @@ args = ["--custom-flag"]
                 prompt_template: None,
                 working_dir: None,
                 timeout: None,
+                model: None,
             },
         };
 
@@ -1070,6 +1085,7 @@ args = ["--custom-flag"]
                 prompt_template: None,
                 working_dir: None,
                 timeout: None,
+                model: None,
             },
         };
 

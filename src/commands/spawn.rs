@@ -180,7 +180,7 @@ fn spawn_agent_inner(
     let task_context = build_task_context(&graph, task);
 
     // Create template variables
-    let vars = TemplateVars::from_task(task, Some(&task_context), Some(dir));
+    let mut vars = TemplateVars::from_task(task, Some(&task_context), Some(dir));
 
     // Get task exec command for shell executor
     let task_exec = task.exec.clone();
@@ -193,6 +193,17 @@ fn spawn_agent_inner(
     // For shell executor, we need an exec command
     if executor_config.executor.executor_type == "shell" && task_exec.is_none() {
         anyhow::bail!("Task '{}' has no exec command for shell executor", task_id);
+    }
+
+    // Model resolution hierarchy:
+    //   task.model > executor.model > model param (CLI --model or coordinator.model)
+    let effective_model = task_model
+        .or_else(|| executor_config.executor.model.clone())
+        .or_else(|| model.map(std::string::ToString::to_string));
+
+    // Override model in template vars with effective model
+    if let Some(ref m) = effective_model {
+        vars.model = m.clone();
     }
 
     // Load agent registry and prepare agent output directory
@@ -211,11 +222,8 @@ fn spawn_agent_inner(
     let output_file = output_dir.join("output.log");
     let output_file_str = output_file.to_string_lossy().to_string();
 
-    // Apply templates to executor settings
+    // Apply templates to executor settings (with effective model in vars)
     let settings = executor_config.apply_templates(&vars);
-
-    // Determine model: CLI/coordinator model > task.model > none
-    let effective_model = model.map(std::string::ToString::to_string).or(task_model);
 
     // Build the inner command string first
     let inner_command = match settings.executor_type.as_str() {
@@ -415,8 +423,14 @@ exit $EXIT_CODE
 
     let pid = child.id();
 
-    // Register the agent
-    let agent_id = agent_registry.register_agent(pid, task_id, executor_name, &output_file_str);
+    // Register the agent (with model tracking)
+    let agent_id = agent_registry.register_agent_with_model(
+        pid,
+        task_id,
+        executor_name,
+        &output_file_str,
+        effective_model.as_deref(),
+    );
     if let Err(save_err) = agent_registry.save(dir) {
         // Registry save failed — kill the orphaned process to prevent invisible agents
         eprintln!(

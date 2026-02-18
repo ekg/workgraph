@@ -784,13 +784,13 @@ fn spawn_agents_for_ready_tasks(
                 .unwrap_or_else(|| executor.to_string())
         };
 
-        // Task-level model takes priority over service-level model
-        let effective_model = task.model.as_deref().or(model);
+        // Pass coordinator model to spawn; spawn resolves the full hierarchy:
+        // task.model > executor.model > coordinator.model > 'default'
         eprintln!(
             "[coordinator] Spawning agent for: {} - {} (executor: {})",
             task.id, task.title, effective_executor
         );
-        match spawn::spawn_agent(dir, &task.id, &effective_executor, None, effective_model) {
+        match spawn::spawn_agent(dir, &task.id, &effective_executor, None, model) {
             Ok((agent_id, pid)) => {
                 eprintln!("[coordinator] Spawned {} (PID {})", agent_id, pid);
                 spawned += 1;
@@ -2660,9 +2660,8 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
             }
         });
         if !agency_agents_defined {
-            output["warning"] = serde_json::json!(
-                "No agents defined — run 'wg agency init' or 'wg agent create'"
-            );
+            output["warning"] =
+                serde_json::json!("No agents defined — run 'wg agency init' or 'wg agent create'");
         }
         if !recent_errors.is_empty() || !recent_fatals.is_empty() {
             let mut all_errors: Vec<String> = recent_fatals;
@@ -3840,10 +3839,7 @@ poll_interval = 120
 
         let no_agents_defined = agents.is_empty();
         let warn_no_agents = config.agency.auto_assign && no_agents_defined;
-        assert!(
-            !warn_no_agents,
-            "Should NOT warn when agents are defined"
-        );
+        assert!(!warn_no_agents, "Should NOT warn when agents are defined");
     }
 
     #[test]
@@ -3855,15 +3851,13 @@ poll_interval = 120
         fs::create_dir_all(wg_dir.join("agency").join("agents")).unwrap();
 
         let agents_dir = wg_dir.join("agency").join("agents");
-        let agency_agents_defined =
-            !agency::load_all_agents_or_warn(&agents_dir).is_empty();
+        let agency_agents_defined = !agency::load_all_agents_or_warn(&agents_dir).is_empty();
 
         // No agents defined — should show the "No agents defined" message
         assert!(!agency_agents_defined);
 
         let status_line = if !agency_agents_defined {
-            "Agents: No agents defined — run 'wg agency init' or 'wg agent create'"
-                .to_string()
+            "Agents: No agents defined — run 'wg agency init' or 'wg agent create'".to_string()
         } else {
             format!("Agents: 0 alive, 0 idle, 0 total")
         };
@@ -3885,13 +3879,11 @@ poll_interval = 120
         super::super::agency_init::run(wg_dir).unwrap();
 
         let agents_dir = wg_dir.join("agency").join("agents");
-        let agency_agents_defined =
-            !agency::load_all_agents_or_warn(&agents_dir).is_empty();
+        let agency_agents_defined = !agency::load_all_agents_or_warn(&agents_dir).is_empty();
         assert!(agency_agents_defined);
 
         let status_line = if !agency_agents_defined {
-            "Agents: No agents defined — run 'wg agency init' or 'wg agent create'"
-                .to_string()
+            "Agents: No agents defined — run 'wg agency init' or 'wg agent create'".to_string()
         } else {
             format!("Agents: 0 alive, 0 idle, 0 total")
         };
