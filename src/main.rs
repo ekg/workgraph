@@ -665,7 +665,7 @@ enum Commands {
         /// Task ID to spawn an agent for
         task: String,
 
-        /// Executor to use (claude, shell, or custom config name)
+        /// Executor to use (claude, amplifier, shell, or custom config name)
         #[arg(long)]
         executor: String,
 
@@ -721,7 +721,7 @@ enum Commands {
         #[arg(long)]
         init: bool,
 
-        /// Set executor (claude, opencode, codex)
+        /// Set executor (claude, amplifier, shell, or custom config name)
         #[arg(long)]
         executor: Option<String>,
 

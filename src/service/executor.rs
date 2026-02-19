@@ -412,6 +412,74 @@ Begin working on the task now."#.to_string(),
                     model: None,
                 },
             }),
+            "amplifier" => Ok(ExecutorConfig {
+                executor: ExecutorSettings {
+                    executor_type: "amplifier".to_string(),
+                    command: "amplifier".to_string(),
+                    args: vec![
+                        "run".to_string(),
+                        "--mode".to_string(),
+                        "single".to_string(),
+                        "--output-format".to_string(),
+                        "text".to_string(),
+                    ],
+                    env: {
+                        let mut env = HashMap::new();
+                        env.insert("WG_TASK_ID".to_string(), "{{task_id}}".to_string());
+                        env
+                    },
+                    prompt_template: Some(PromptTemplate {
+                        template: r#"{{skills_preamble}}# Task Assignment
+
+You are an AI agent working on a task in a workgraph project.
+
+{{task_identity}}
+## Your Task
+- **ID:** {{task_id}}
+- **Title:** {{task_title}}
+- **Description:** {{task_description}}
+
+## Context from Dependencies
+{{task_context}}
+
+## Required Workflow
+
+You MUST use these commands to track your work:
+
+1. **Log progress** as you work (helps recovery if interrupted):
+   ```bash
+   wg log {{task_id}} "Starting implementation..."
+   wg log {{task_id}} "Completed X, now working on Y"
+   ```
+
+2. **Record artifacts** if you create/modify files:
+   ```bash
+   wg artifact {{task_id}} path/to/file
+   ```
+
+3. **Complete the task** when done:
+   ```bash
+   wg done {{task_id}}
+   ```
+
+4. **Mark as failed** if you cannot complete:
+   ```bash
+   wg fail {{task_id}} --reason "Specific reason why"
+   ```
+
+## Important
+- Run `wg log` commands BEFORE doing work to track progress
+- Run `wg done` BEFORE you finish responding
+- If the task description is unclear, do your best interpretation
+- Focus only on this specific task
+
+Begin working on the task now."#.to_string(),
+                    }),
+                    working_dir: Some("{{working_dir}}".to_string()),
+                    timeout: Some(600),
+                    model: None,
+                },
+            }),
             "default" => Ok(ExecutorConfig {
                 executor: ExecutorSettings {
                     executor_type: "default".to_string(),
@@ -425,7 +493,7 @@ Begin working on the task now."#.to_string(),
                 },
             }),
             _ => Err(anyhow!(
-                "Unknown executor '{}'. Available: claude, shell, default",
+                "Unknown executor '{}'. Available: claude, amplifier, shell, default",
                 name,
             )),
         }

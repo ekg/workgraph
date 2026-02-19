@@ -250,6 +250,38 @@ fn spawn_agent_inner(
                 claude_cmd
             }
         }
+        "amplifier" => {
+            // Write prompt to file and pipe to amplifier - same pattern as claude
+            let mut cmd_parts = vec![shell_escape(&settings.command)];
+            for arg in &settings.args {
+                cmd_parts.push(shell_escape(arg));
+            }
+            // Add model flag if specified.
+            // Model can be "provider:model" (e.g., "provider-openai:minimax/minimax-m2.5")
+            // which splits into -p provider -m model, or just "model" which passes -m only.
+            // If no model is set, amplifier uses its settings.yaml default.
+            if let Some(ref m) = effective_model {
+                if let Some((provider, model)) = m.split_once(':') {
+                    cmd_parts.push("-p".to_string());
+                    cmd_parts.push(shell_escape(provider));
+                    cmd_parts.push("-m".to_string());
+                    cmd_parts.push(shell_escape(model));
+                } else {
+                    cmd_parts.push("-m".to_string());
+                    cmd_parts.push(shell_escape(m));
+                }
+            }
+            let amplifier_cmd = cmd_parts.join(" ");
+
+            if let Some(ref prompt_template) = settings.prompt_template {
+                let prompt_file = output_dir.join("prompt.txt");
+                fs::write(&prompt_file, &prompt_template.template)
+                    .with_context(|| format!("Failed to write prompt file: {:?}", prompt_file))?;
+                prompt_file_command(&prompt_file.to_string_lossy(), &amplifier_cmd)
+            } else {
+                amplifier_cmd
+            }
+        }
         "shell" => {
             format!(
                 "{} -c {}",
