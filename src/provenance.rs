@@ -57,7 +57,8 @@ pub fn append_operation(
         }
     }
 
-    let line = serde_json::to_string(entry).context("Failed to serialize operation entry")?;
+    let mut line = serde_json::to_string(entry).context("Failed to serialize operation entry")?;
+    line.push('\n');
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -65,7 +66,9 @@ pub fn append_operation(
         .open(&path)
         .context("Failed to open operations.jsonl for append")?;
 
-    writeln!(file, "{}", line).context("Failed to write operation entry")?;
+    // Single write_all call ensures atomicity on O_APPEND files for sizes < PIPE_BUF
+    file.write_all(line.as_bytes())
+        .context("Failed to write operation entry")?;
 
     Ok(())
 }
