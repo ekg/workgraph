@@ -110,7 +110,7 @@ fn test_trace_returns_structured_data() {
 
     // Trace each task and verify output is non-empty
     for task_id in &["build", "test", "lint", "deploy"] {
-        let output = wg_ok(&wg_dir, &["trace", task_id]);
+        let output = wg_ok(&wg_dir, &["trace", "show", task_id]);
         assert!(
             output.contains(&format!("Trace: {}", task_id)),
             "trace output for {} should contain header: {}",
@@ -130,7 +130,7 @@ fn test_trace_json_is_parseable() {
     let t1 = make_task("alpha", "Alpha task", Status::Done);
     let wg_dir = setup_workgraph(&tmp, vec![t1]);
 
-    let output = wg_json(&wg_dir, &["trace", "alpha"]);
+    let output = wg_json(&wg_dir, &["trace", "show", "alpha"]);
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap_or_else(|e| {
         panic!(
             "trace --json output should be valid JSON.\nError: {}\nOutput: {}",
@@ -564,7 +564,7 @@ fn test_trace_ops_only_mode() {
     // Create a replay to generate provenance entries
     wg_ok(&wg_dir, &["replay", "--failed-only"]);
 
-    let output = wg_ok(&wg_dir, &["trace", "ops-task", "--ops-only"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "ops-task", "--ops-only"]);
     // Should show ops or "No operations" — the replay op is task_id=None,
     // but there should be no per-task ops unless we add some
     assert!(
@@ -580,7 +580,7 @@ fn test_trace_full_mode() {
     let t1 = make_task("full-task", "Full trace test", Status::Done);
     let wg_dir = setup_workgraph(&tmp, vec![t1]);
 
-    let output = wg_ok(&wg_dir, &["trace", "full-task", "--full"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "full-task", "--full"]);
     assert!(
         output.contains("Trace: full-task"),
         "full mode output should contain task header: {}",

@@ -46,11 +46,10 @@ pub fn next_run_id(workgraph_dir: &Path) -> String {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if let Some(num_str) = name.strip_prefix("run-") {
-                if let Ok(num) = num_str.parse::<u32>() {
+            if let Some(num_str) = name.strip_prefix("run-")
+                && let Ok(num) = num_str.parse::<u32>() {
                     max = max.max(num);
                 }
-            }
         }
     }
     format!("run-{:03}", max + 1)

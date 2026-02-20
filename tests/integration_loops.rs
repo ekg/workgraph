@@ -651,3 +651,208 @@ fn test_loop_source_not_reopened_when_at_max_iterations() {
         "Source should remain Done when loop doesn't fire"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test: Loop converges early — done --converged stops loop from firing
+// ---------------------------------------------------------------------------
+#[test]
+fn test_converged_tag_stops_loop_firing() {
+    let mut graph = WorkGraph::new();
+
+    // A→B→C chain with loop from C→A (max 3)
+    let a = make_task("a");
+    let mut b = make_task("b");
+    b.blocked_by = vec!["a".to_string()];
+    let mut c = make_task("c");
+    c.blocked_by = vec!["b".to_string()];
+    c.loops_to = vec![LoopEdge {
+        target: "a".to_string(),
+        guard: None,
+        max_iterations: 3,
+        delay: None,
+    }];
+
+    graph.add_node(Node::Task(a));
+    graph.add_node(Node::Task(b));
+    graph.add_node(Node::Task(c));
+
+    // Complete all tasks
+    graph.get_task_mut("a").unwrap().status = Status::Done;
+    graph.get_task_mut("b").unwrap().status = Status::Done;
+    graph.get_task_mut("c").unwrap().status = Status::Done;
+
+    // Mark C as converged (simulates `wg done c --converged`)
+    graph
+        .get_task_mut("c")
+        .unwrap()
+        .tags
+        .push("converged".to_string());
+
+    let reactivated = evaluate_loop_edges(&mut graph, "c");
+
+    // Nothing should be reactivated
+    assert!(
+        reactivated.is_empty(),
+        "Converged task should not fire loop edges"
+    );
+
+    // All tasks should stay Done
+    assert_eq!(graph.get_task("a").unwrap().status, Status::Done);
+    assert_eq!(graph.get_task("b").unwrap().status, Status::Done);
+    assert_eq!(graph.get_task("c").unwrap().status, Status::Done);
+
+    // loop_iteration should not increment
+    assert_eq!(graph.get_task("a").unwrap().loop_iteration, 0);
+    assert_eq!(graph.get_task("c").unwrap().loop_iteration, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Test: Loop runs to max without --converged (no regression)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_loop_runs_to_max_without_converged() {
+    let mut graph = WorkGraph::new();
+
+    let mut t = make_task("worker");
+    t.loops_to = vec![LoopEdge {
+        target: "worker".to_string(),
+        guard: None,
+        max_iterations: 2,
+        delay: None,
+    }];
+    graph.add_node(Node::Task(t));
+
+    // Iteration 0→1
+    graph.get_task_mut("worker").unwrap().status = Status::Done;
+    let r = evaluate_loop_edges(&mut graph, "worker");
+    assert!(!r.is_empty(), "Loop should fire at iteration 0");
+    assert_eq!(graph.get_task("worker").unwrap().loop_iteration, 1);
+
+    // Iteration 1→2
+    graph.get_task_mut("worker").unwrap().status = Status::Done;
+    let r = evaluate_loop_edges(&mut graph, "worker");
+    assert!(!r.is_empty(), "Loop should fire at iteration 1");
+    assert_eq!(graph.get_task("worker").unwrap().loop_iteration, 2);
+
+    // Iteration 2: at max, should not fire
+    graph.get_task_mut("worker").unwrap().status = Status::Done;
+    let r = evaluate_loop_edges(&mut graph, "worker");
+    assert!(
+        r.is_empty(),
+        "Loop should not fire at max_iterations"
+    );
+    assert_eq!(graph.get_task("worker").unwrap().status, Status::Done);
+}
+
+// ---------------------------------------------------------------------------
+// Test: Retry clears converged tag
+// ---------------------------------------------------------------------------
+#[test]
+fn test_retry_clears_converged_tag() {
+    let mut graph = WorkGraph::new();
+
+    let mut t = make_task("conv");
+    t.status = Status::Done;
+    t.tags.push("converged".to_string());
+    t.loops_to = vec![LoopEdge {
+        target: "conv".to_string(),
+        guard: None,
+        max_iterations: 5,
+        delay: None,
+    }];
+    graph.add_node(Node::Task(t));
+
+    // Simulate retry: set to Failed, then clear converged tag (as retry.rs does)
+    {
+        let task = graph.get_task_mut("conv").unwrap();
+        task.status = Status::Failed;
+    }
+    {
+        let task = graph.get_task_mut("conv").unwrap();
+        task.status = Status::Open;
+        task.tags.retain(|t| t != "converged");
+    }
+
+    // Now complete again without converged — loop should fire
+    graph.get_task_mut("conv").unwrap().status = Status::Done;
+    let r = evaluate_loop_edges(&mut graph, "conv");
+
+    assert!(
+        !r.is_empty(),
+        "After retry clears converged tag, loop should fire again"
+    );
+    assert_eq!(graph.get_task("conv").unwrap().loop_iteration, 1);
+    assert!(!graph
+        .get_task("conv")
+        .unwrap()
+        .tags
+        .contains(&"converged".to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// Test: --converged on task with no loop edges (harmless)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_converged_on_task_with_no_loop_edges() {
+    let mut graph = WorkGraph::new();
+
+    let mut t = make_task("solo");
+    t.status = Status::Done;
+    t.tags.push("converged".to_string());
+    // No loops_to edges
+    graph.add_node(Node::Task(t));
+
+    let reactivated = evaluate_loop_edges(&mut graph, "solo");
+
+    // Should return empty (early return from converged check), no errors
+    assert!(reactivated.is_empty());
+    assert_eq!(graph.get_task("solo").unwrap().status, Status::Done);
+}
+
+// ---------------------------------------------------------------------------
+// Test: Multiple loop edges, one convergence stops all
+// ---------------------------------------------------------------------------
+#[test]
+fn test_converged_stops_all_loop_edges() {
+    let mut graph = WorkGraph::new();
+
+    let a = make_task("a");
+    let b = make_task("b");
+    let mut src = make_task("src");
+    src.status = Status::Done;
+    src.tags.push("converged".to_string());
+    src.loops_to = vec![
+        LoopEdge {
+            target: "a".to_string(),
+            guard: None,
+            max_iterations: 5,
+            delay: None,
+        },
+        LoopEdge {
+            target: "b".to_string(),
+            guard: None,
+            max_iterations: 5,
+            delay: None,
+        },
+    ];
+
+    graph.add_node(Node::Task(a));
+    graph.add_node(Node::Task(b));
+    graph.add_node(Node::Task(src));
+
+    // Mark A and B as Done so they could be re-activated
+    graph.get_task_mut("a").unwrap().status = Status::Done;
+    graph.get_task_mut("b").unwrap().status = Status::Done;
+
+    let reactivated = evaluate_loop_edges(&mut graph, "src");
+
+    // Neither A nor B should be reactivated
+    assert!(
+        reactivated.is_empty(),
+        "Converged should stop ALL loop edges"
+    );
+    assert_eq!(graph.get_task("a").unwrap().status, Status::Done);
+    assert_eq!(graph.get_task("b").unwrap().status, Status::Done);
+    assert_eq!(graph.get_task("a").unwrap().loop_iteration, 0);
+    assert_eq!(graph.get_task("b").unwrap().loop_iteration, 0);
+}

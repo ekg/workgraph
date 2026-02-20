@@ -107,11 +107,10 @@ fn parse_stream_json_stats(output: &str) -> (usize, usize) {
                 _ => {}
             }
             // Also check for content_block with type "tool_use"
-            if let Some(content_type) = val.get("content_block").and_then(|cb| cb.get("type")).and_then(|t| t.as_str()) {
-                if content_type == "tool_use" {
+            if let Some(content_type) = val.get("content_block").and_then(|cb| cb.get("type")).and_then(|t| t.as_str())
+                && content_type == "tool_use" {
                     tool_calls += 1;
                 }
-            }
         }
     }
 

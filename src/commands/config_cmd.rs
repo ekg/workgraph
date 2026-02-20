@@ -100,12 +100,10 @@ pub fn init(dir: &Path, scope: Option<ConfigScope>) -> Result<()> {
             let path = Config::global_config_path()?;
             println!("Global configuration already exists at {}", path.display());
         }
+    } else if Config::init(dir)? {
+        println!("Created default configuration at .workgraph/config.toml");
     } else {
-        if Config::init(dir)? {
-            println!("Created default configuration at .workgraph/config.toml");
-        } else {
-            println!("Configuration already exists at .workgraph/config.toml");
-        }
+        println!("Configuration already exists at .workgraph/config.toml");
     }
     Ok(())
 }

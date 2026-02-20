@@ -1191,7 +1191,7 @@ fn test_trace_after_restore() {
     wg_ok(&wg_dir, &["runs", "restore", "run-001"]);
 
     // Trace should show tr1 as Failed (restored state)
-    let output = wg_ok(&wg_dir, &["trace", "tr1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "tr1"]);
     assert!(
         output.contains("failed") || output.contains("Failed"),
         "trace should show restored status 'failed': {}",
@@ -1199,7 +1199,7 @@ fn test_trace_after_restore() {
     );
 
     // JSON trace should have status = "failed"
-    let json = wg_json(&wg_dir, &["trace", "tr1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "tr1"]);
     assert_eq!(
         json["status"].as_str().unwrap().to_lowercase(),
         "failed",
@@ -1287,7 +1287,7 @@ fn test_multiple_replay_cycles_preserve_all_archives() {
     );
 
     // Trace should show both agent runs
-    let json = wg_json(&wg_dir, &["trace", "mr1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "mr1"]);
     let agent_count = json["summary"]["agent_run_count"]
         .as_u64()
         .unwrap_or(0);

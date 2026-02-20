@@ -187,6 +187,10 @@ enum Commands {
     Done {
         /// Task ID to mark as done
         id: String,
+
+        /// Signal that the task's iterative loop has converged (stops loop edges from firing)
+        #[arg(long)]
+        converged: bool,
     },
 
     /// Mark a task as failed (can be retried)
@@ -452,18 +456,10 @@ enum Commands {
         id: String,
     },
 
-    /// Trace the complete execution history of a task
+    /// Trace commands: execution history and trace functions
     Trace {
-        /// Task ID to trace
-        id: String,
-
-        /// Show complete agent conversation output
-        #[arg(long)]
-        full: bool,
-
-        /// Show only provenance log entries for this task
-        #[arg(long)]
-        ops_only: bool,
+        #[command(subcommand)]
+        command: TraceCommands,
     },
 
     /// Replay tasks: snapshot graph, selectively reset tasks, re-execute with a different model
@@ -940,6 +936,94 @@ enum Commands {
     Matrix {
         #[command(subcommand)]
         command: MatrixCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TraceCommands {
+    /// Show the execution history of a task
+    Show {
+        /// Task ID to trace
+        id: String,
+
+        /// Show complete agent conversation output
+        #[arg(long)]
+        full: bool,
+
+        /// Show only provenance log entries for this task
+        #[arg(long)]
+        ops_only: bool,
+    },
+
+    /// List available trace functions
+    #[command(name = "list-functions")]
+    ListFunctions {
+        /// Show input parameters and task templates
+        #[arg(long)]
+        verbose: bool,
+    },
+
+    /// Show details of a trace function
+    #[command(name = "show-function")]
+    ShowFunction {
+        /// Function ID (prefix match supported)
+        id: String,
+    },
+
+    /// Extract a trace function from a completed task
+    Extract {
+        /// Task ID to extract from
+        task_id: String,
+
+        /// Function name/ID (default: derived from task ID)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Include all subtasks (tasks blocked by this one) in the function
+        #[arg(long)]
+        subgraph: bool,
+
+        /// Use LLM to generalize descriptions (not yet wired)
+        #[arg(long)]
+        generalize: bool,
+
+        /// Write to specific path instead of .workgraph/functions/<name>.yaml
+        #[arg(long)]
+        output: Option<String>,
+
+        /// Overwrite existing function with same name
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Create tasks from a trace function with provided inputs
+    Instantiate {
+        /// Function ID (prefix match supported)
+        function_id: String,
+
+        /// Set an input parameter (repeatable, format: key=value)
+        #[arg(long = "input", num_args = 1)]
+        inputs: Vec<String>,
+
+        /// Read inputs from a YAML/JSON file
+        #[arg(long = "input-file")]
+        input_file: Option<String>,
+
+        /// Override the task ID prefix (default: from feature_name input)
+        #[arg(long)]
+        prefix: Option<String>,
+
+        /// Show what tasks would be created without creating them
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Make all root tasks depend on this task (repeatable)
+        #[arg(long = "blocked-by")]
+        blocked_by: Vec<String>,
+
+        /// Set model for all created tasks
+        #[arg(long)]
+        model: Option<String>,
     },
 }
 
@@ -1968,7 +2052,7 @@ fn main() -> Result<()> {
             remove_loops_to.as_deref(),
             loop_iteration,
         ),
-        Commands::Done { id } => commands::done::run(&workgraph_dir, &id),
+        Commands::Done { id, converged } => commands::done::run(&workgraph_dir, &id, converged),
         Commands::Fail { id, reason } => {
             commands::fail::run(&workgraph_dir, &id, reason.as_deref())
         }
@@ -2054,18 +2138,61 @@ fn main() -> Result<()> {
             include_done,
         } => commands::gc::run(&workgraph_dir, dry_run, include_done),
         Commands::Show { id } => commands::show::run(&workgraph_dir, &id, cli.json),
-        Commands::Trace { id, full, ops_only } => {
-            let mode = if cli.json {
-                commands::trace::TraceMode::Json
-            } else if full {
-                commands::trace::TraceMode::Full
-            } else if ops_only {
-                commands::trace::TraceMode::OpsOnly
-            } else {
-                commands::trace::TraceMode::Summary
-            };
-            commands::trace::run(&workgraph_dir, &id, mode)
-        }
+        Commands::Trace { command } => match command {
+            TraceCommands::Show { id, full, ops_only } => {
+                let mode = if cli.json {
+                    commands::trace::TraceMode::Json
+                } else if full {
+                    commands::trace::TraceMode::Full
+                } else if ops_only {
+                    commands::trace::TraceMode::OpsOnly
+                } else {
+                    commands::trace::TraceMode::Summary
+                };
+                commands::trace::run(&workgraph_dir, &id, mode)
+            }
+            TraceCommands::ListFunctions { verbose } => {
+                commands::trace_function_cmd::run_list(&workgraph_dir, cli.json, verbose)
+            }
+            TraceCommands::ShowFunction { id } => {
+                commands::trace_function_cmd::run_show(&workgraph_dir, &id, cli.json)
+            }
+            TraceCommands::Extract {
+                task_id,
+                name,
+                subgraph,
+                generalize,
+                output,
+                force,
+            } => commands::trace_extract::run(
+                &workgraph_dir,
+                &task_id,
+                name.as_deref(),
+                subgraph,
+                generalize,
+                output.as_deref(),
+                force,
+            ),
+            TraceCommands::Instantiate {
+                function_id,
+                inputs,
+                input_file,
+                prefix,
+                dry_run,
+                blocked_by,
+                model,
+            } => commands::trace_instantiate::run(
+                &workgraph_dir,
+                &function_id,
+                &inputs,
+                input_file.as_deref(),
+                prefix.as_deref(),
+                dry_run,
+                &blocked_by,
+                model.as_deref(),
+                cli.json,
+            ),
+        },
         Commands::Replay {
             model,
             failed_only,

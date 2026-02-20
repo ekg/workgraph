@@ -218,6 +218,8 @@ Every loop edge must specify `max_iterations`. There are no unbounded loops. Whe
 
 This is a safety property. A guard condition with a logic error could fire indefinitely; `max_iterations` guarantees that every cycle terminates. The cap is per-edge—if multiple loop edges point at the same target, each has its own limit.
 
+An agent can also signal convergence explicitly. Running `wg done <task-id> --converged` tags the task with `converged`, causing the loop evaluator to skip firing—even if iterations remain and guard conditions are met. This lets agents terminate loops early when the work is complete, without waiting for the iteration cap.
+
 === Loop Delays
 
 A loop edge can specify a `delay`: a human-readable duration like `"30s"`, `"5m"`, `"1h"`, or `"1d"`. When a delayed loop fires, instead of making the target immediately ready, it sets the target's `ready_after` timestamp to `now + delay`. The scheduler will not dispatch the target until the delay has elapsed.

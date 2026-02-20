@@ -564,6 +564,12 @@ fn evaluate_guard(guard: &Option<LoopGuard>, graph: &WorkGraph) -> bool {
 ///
 /// Returns the list of task IDs that were re-activated.
 pub fn evaluate_loop_edges(graph: &mut WorkGraph, source_id: &str) -> Vec<String> {
+    // Check if the source task signaled convergence — skip all loop firing
+    if let Some(task) = graph.get_task(source_id)
+        && task.tags.contains(&"converged".to_string()) {
+            return vec![];
+        }
+
     // Collect loop edges from the source task (clone to avoid borrow issues)
     let loop_edges: Vec<LoopEdge> = match graph.get_task(source_id) {
         Some(task) => task.loops_to.clone(),

@@ -43,6 +43,8 @@ pub fn run(dir: &Path, id: &str) -> Result<()> {
     task.failure_reason = None;
     // Clear assigned so the coordinator can re-spawn an agent
     task.assigned = None;
+    // Clear converged tag so the loop can fire again if needed
+    task.tags.retain(|t| t != "converged");
 
     task.log.push(LogEntry {
         timestamp: Utc::now().to_rfc3339(),
@@ -294,5 +296,25 @@ mod tests {
         let result = run(dir_path, "nonexistent");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_retry_clears_converged_tag() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+        let mut task = make_task("t1", "Test task", Status::Failed);
+        task.retry_count = 1;
+        task.tags.push("converged".to_string());
+        setup_workgraph(dir_path, vec![task]);
+
+        run(dir_path, "t1").unwrap();
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+        let task = graph.get_task("t1").unwrap();
+        assert!(
+            !task.tags.contains(&"converged".to_string()),
+            "Retry should clear converged tag"
+        );
     }
 }

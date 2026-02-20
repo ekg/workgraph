@@ -11,7 +11,7 @@ use super::graph_path;
 #[cfg(test)]
 use workgraph::parser::load_graph;
 
-pub fn run(dir: &Path, id: &str) -> Result<()> {
+pub fn run(dir: &Path, id: &str, converged: bool) -> Result<()> {
     let (mut graph, path) = super::load_workgraph_mut(dir)?;
 
     let task = graph.get_task_mut_or_err(id)?;
@@ -44,10 +44,18 @@ pub fn run(dir: &Path, id: &str) -> Result<()> {
     task.status = Status::Done;
     task.completed_at = Some(Utc::now().to_rfc3339());
 
+    if converged && !task.tags.contains(&"converged".to_string()) {
+        task.tags.push("converged".to_string());
+    }
+
     task.log.push(LogEntry {
         timestamp: Utc::now().to_rfc3339(),
         actor: task.assigned.clone(),
-        message: "Task marked as done".to_string(),
+        message: if converged {
+            "Task marked as done (converged)".to_string()
+        } else {
+            "Task marked as done".to_string()
+        },
     });
 
     // Evaluate loop edges: re-activate upstream tasks if conditions are met
@@ -119,7 +127,7 @@ mod tests {
         let dir_path = dir.path();
         setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Open)]);
 
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -137,7 +145,7 @@ mod tests {
             vec![make_task("t1", "Test task", Status::InProgress)],
         );
 
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -153,7 +161,7 @@ mod tests {
         setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Done)]);
 
         // Should return Ok (idempotent) rather than error
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
     }
 
@@ -168,7 +176,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![blocker, blocked]);
 
-        let result = run(dir_path, "blocked");
+        let result = run(dir_path, "blocked", false);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("blocked by"));
@@ -186,7 +194,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![blocker, blocked]);
 
-        let result = run(dir_path, "blocked");
+        let result = run(dir_path, "blocked", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -207,7 +215,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![blocker, blocked]);
 
-        let result = run(dir_path, "blocked");
+        let result = run(dir_path, "blocked", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -228,7 +236,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![blocker, blocked]);
 
-        let result = run(dir_path, "blocked");
+        let result = run(dir_path, "blocked", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -248,7 +256,7 @@ mod tests {
         setup_workgraph(dir_path, vec![task]);
 
         // Verified tasks can now use wg done directly (submit is deprecated)
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -264,7 +272,7 @@ mod tests {
         setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Open)]);
 
         let before = Utc::now();
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -287,7 +295,7 @@ mod tests {
         task.assigned = Some("agent-1".to_string());
         setup_workgraph(dir_path, vec![task]);
 
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -319,7 +327,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![source, target]);
 
-        let result = run(dir_path, "source");
+        let result = run(dir_path, "source", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -342,7 +350,7 @@ mod tests {
         let dir_path = dir.path();
         setup_workgraph(dir_path, vec![]);
 
-        let result = run(dir_path, "nonexistent");
+        let result = run(dir_path, "nonexistent", false);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -354,7 +362,7 @@ mod tests {
         let dir_path = dir.path();
         // Don't initialize workgraph
 
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("not initialized"));
@@ -366,7 +374,7 @@ mod tests {
         let dir_path = dir.path();
         setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Open)]);
 
-        let result = run(dir_path, "t1");
+        let result = run(dir_path, "t1", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -396,7 +404,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![source, target]);
 
-        let result = run(dir_path, "source");
+        let result = run(dir_path, "source", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -437,7 +445,7 @@ mod tests {
 
         setup_workgraph(dir_path, vec![task_a, task_b, task_c]);
 
-        let result = run(dir_path, "c");
+        let result = run(dir_path, "c", false);
         assert!(result.is_ok());
 
         let path = graph_path(dir_path);
@@ -456,5 +464,59 @@ mod tests {
         let c = graph.get_task("c").unwrap();
         assert_eq!(c.status, Status::Open);
         assert_eq!(c.loop_iteration, 1);
+    }
+
+    #[test]
+    fn test_done_converged_adds_tag_and_stops_loop() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        let mut source = make_task("source", "Source task", Status::InProgress);
+        source.loops_to = vec![LoopEdge {
+            target: "target".to_string(),
+            guard: None,
+            max_iterations: 3,
+            delay: None,
+        }];
+
+        let mut target = make_task("target", "Target task", Status::Done);
+        target.loop_iteration = 0;
+
+        setup_workgraph(dir_path, vec![source, target]);
+
+        let result = run(dir_path, "source", true);
+        assert!(result.is_ok());
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+
+        // Source should have converged tag
+        let source = graph.get_task("source").unwrap();
+        assert!(source.tags.contains(&"converged".to_string()));
+
+        // Source should stay Done (loop did not fire)
+        assert_eq!(source.status, Status::Done);
+
+        // Target should also stay Done
+        let target = graph.get_task("target").unwrap();
+        assert_eq!(target.status, Status::Done);
+        assert_eq!(target.loop_iteration, 0);
+    }
+
+    #[test]
+    fn test_done_converged_log_message() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+        setup_workgraph(dir_path, vec![make_task("t1", "Test task", Status::Open)]);
+
+        let result = run(dir_path, "t1", true);
+        assert!(result.is_ok());
+
+        let path = graph_path(dir_path);
+        let graph = load_graph(&path).unwrap();
+        let task = graph.get_task("t1").unwrap();
+
+        let last_log = task.log.last().unwrap();
+        assert_eq!(last_log.message, "Task marked as done (converged)");
     }
 }

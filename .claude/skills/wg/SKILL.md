@@ -113,7 +113,7 @@ wg add "Poll" --loops-to poll --loop-max 10 --loop-delay 5m
 wg add "Retry" --loops-to retry --loop-max 5 --loop-guard "task:conn-check=done"
 ```
 
-As a spawned agent on a looping task, check `wg show <task-id>` for `loop_iteration` to know which pass you're on. Review previous logs and artifacts to build on prior work.
+As a spawned agent on a looping task, check `wg show <task-id>` for `loop_iteration` to know which pass you're on. Review previous logs and artifacts to build on prior work. If the work has converged and no more iterations are needed, use `wg done <task-id> --converged` to signal early termination — the loop edge will not fire again.
 
 ```bash
 wg loops                    # List all loop edges and status

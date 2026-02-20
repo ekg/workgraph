@@ -13,6 +13,7 @@ pub mod provenance;
 pub mod query;
 pub mod runs;
 pub mod service;
+pub mod trace_function;
 pub mod usage;
 
 pub use config::MatrixConfig;

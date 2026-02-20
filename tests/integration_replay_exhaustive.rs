@@ -152,11 +152,11 @@ fn test_trace_no_agent_runs_output_content() {
     ).unwrap();
 
     // Human-readable output
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains("Agent runs: (none)"), "Should show no agent runs: {}", output);
 
     // JSON output
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["agent_runs"].as_array().unwrap().len(), 0);
     assert_eq!(json["summary"]["agent_run_count"], 0);
     assert!(json["operations"].as_array().unwrap().len() >= 3,
@@ -173,10 +173,10 @@ fn test_trace_multiple_agent_runs() {
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt 1", "output 1");
     create_agent_archive(&wg_dir, "t1", "2026-02-18T11:00:00Z", "prompt 2", "output 2");
 
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains("Agent runs (2):"), "Should show 2 agent runs: {}", output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let runs = json["agent_runs"].as_array().unwrap();
     assert_eq!(runs.len(), 2);
     assert_eq!(json["summary"]["agent_run_count"], 2);
@@ -212,7 +212,7 @@ fn test_trace_json_structure_validation() {
 "#;
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:30:00Z", "Test prompt", stream_output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
 
     // Top-level fields
     assert_eq!(json["id"], "t1");
@@ -262,7 +262,7 @@ fn test_trace_full_output_contains_conversation() {
     let output_text = "Agent output response\nwith multiple lines\nof content.";
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", prompt_text, output_text);
 
-    let output = wg_ok(&wg_dir, &["trace", "t1", "--full"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1", "--full"]);
     assert!(output.contains("[Prompt]"), "Should contain [Prompt] header: {}", output);
     assert!(output.contains("[Output]"), "Should contain [Output] header: {}", output);
     assert!(output.contains("multi-line"), "Should contain prompt content: {}", output);
@@ -291,7 +291,7 @@ fn test_trace_ops_only_excludes_agent_runs() {
     // Create an agent archive (should be ignored by --ops-only)
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", "output");
 
-    let output = wg_ok(&wg_dir, &["trace", "t1", "--ops-only"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1", "--ops-only"]);
     assert!(output.contains("Operations for 't1'"), "Should show operations header: {}", output);
     assert!(output.contains("add_task"), "Should show add_task op: {}", output);
     assert!(output.contains("done"), "Should show done op: {}", output);
@@ -312,10 +312,10 @@ fn test_trace_in_progress_task() {
     // Create a partial agent archive
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", "partial output");
 
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains("open"), "Should show status as open: {}", output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["status"], "open");
     assert!(json["summary"]["duration_secs"].is_null(), "duration_secs should be absent for in-progress");
     assert!(json["summary"]["duration_human"].is_null(), "duration_human should be absent");
@@ -333,7 +333,7 @@ fn test_trace_output_size_accuracy() {
     let output_data = "x".repeat(10240);
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", &output_data);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["summary"]["total_output_bytes"], 10240);
 }
 
@@ -361,7 +361,7 @@ fn test_trace_turn_count_accuracy() {
 "#;
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", stream_output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert_eq!(run["turns"], 3, "Should count 3 assistant turns");
     assert_eq!(run["tool_calls"], 5, "Should count 5 tool_use calls");
@@ -383,7 +383,7 @@ fn test_trace_content_block_tool_use_counting() {
 "#;
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", stream_output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert_eq!(run["tool_calls"], 2, "Should count both top-level and content_block tool_use");
 }
@@ -1075,10 +1075,10 @@ fn test_trace_after_replay() {
     wg_ok(&wg_dir, &["replay", "--failed-only"]);
 
     // Trace the reset task
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains("open"), "Should show task as open: {}", output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["status"], "open");
     // Agent archives from before replay should still be accessible
     assert_eq!(json["summary"]["agent_run_count"], 1,
@@ -1099,7 +1099,7 @@ fn test_trace_result_only_stream_json() {
     let stream_output = r#"{"type":"result","cost":{"input":100,"output":50}}"#;
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", stream_output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     // With only a result message, turns should be 1
     assert_eq!(run["turns"], 1, "result-only should count as 1 turn");
@@ -1193,7 +1193,7 @@ fn test_trace_agent_runs_sort_order() {
     create_agent_archive(&wg_dir, "t1", "2026-02-18T08:00:00Z", "prompt 1", "output 1");
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt 2", "output 2");
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let runs = json["agent_runs"].as_array().unwrap();
     assert_eq!(runs.len(), 3);
     // Should be sorted chronologically by timestamp (directory name)
@@ -1324,14 +1324,14 @@ fn test_trace_json_overrides_full_and_ops_only() {
     ).unwrap();
 
     // --json with --full should produce JSON, not full text
-    let json_full = wg_json(&wg_dir, &["trace", "t1", "--full"]);
+    let json_full = wg_json(&wg_dir, &["trace", "show", "t1", "--full"]);
     assert!(json_full["id"].is_string(), "--json should override --full: {:?}", json_full);
     assert_eq!(json_full["id"], "t1");
     assert!(json_full["agent_runs"].is_array());
     assert!(json_full["summary"].is_object());
 
     // --json with --ops-only should produce JSON, not ops-only text
-    let json_ops = wg_json(&wg_dir, &["trace", "t1", "--ops-only"]);
+    let json_ops = wg_json(&wg_dir, &["trace", "show", "t1", "--ops-only"]);
     assert!(json_ops["id"].is_string(), "--json should override --ops-only: {:?}", json_ops);
     assert_eq!(json_ops["id"], "t1");
     assert!(json_ops["agent_runs"].is_array());
@@ -1356,10 +1356,10 @@ fn test_trace_agent_archive_missing_output() {
     // Deliberately NOT writing output.txt
 
     // Should succeed without error
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains("Agent runs (1):"), "Should still list the agent run: {}", output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert!(run["prompt_bytes"].is_number(), "Should have prompt_bytes");
     assert!(run["output_bytes"].is_null(), "output_bytes should be absent when output.txt missing");
@@ -1378,7 +1378,7 @@ fn test_trace_agent_archive_empty_output() {
     // Create archive with empty output.txt
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", "");
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert_eq!(run["output_bytes"], 0, "empty output should have 0 bytes");
     assert!(run["output_lines"].is_null() || run["output_lines"] == 0,
@@ -1413,7 +1413,7 @@ fn test_trace_operation_detail_truncation() {
     ).unwrap();
 
     // Summary mode should truncate long details
-    let output = wg_ok(&wg_dir, &["trace", "t1"]);
+    let output = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(output.contains(short_detail), "Short detail should appear in full: {}", output);
     // Long detail should be truncated with "..."
     assert!(output.contains("..."), "Long detail should be truncated with ...: {}", output);
@@ -1421,7 +1421,7 @@ fn test_trace_operation_detail_truncation() {
     assert!(!output.contains(&long_detail), "Full long detail should not appear in summary mode");
 
     // JSON mode should have full details (not truncated)
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let ops = json["operations"].as_array().unwrap();
     let long_op = ops.iter().find(|o| o["op"] == "long_op").unwrap();
     assert_eq!(long_op["detail"].as_str().unwrap(), long_detail,
@@ -1440,7 +1440,7 @@ fn test_trace_summary_mode_excludes_content() {
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", unique_prompt, unique_output);
 
     // Summary mode (default) should NOT show verbatim prompt/output content
-    let summary = wg_ok(&wg_dir, &["trace", "t1"]);
+    let summary = wg_ok(&wg_dir, &["trace", "show", "t1"]);
     assert!(!summary.contains(unique_prompt),
         "Summary should not contain verbatim prompt text: {}", summary);
     assert!(!summary.contains(unique_output),
@@ -1450,7 +1450,7 @@ fn test_trace_summary_mode_excludes_content() {
         "Summary should show output size info: {}", summary);
 
     // JSON mode should include content
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert!(run["prompt"].is_string(), "JSON should include prompt content");
     assert!(run["output"].is_string(), "JSON should include output content");
@@ -1634,7 +1634,7 @@ fn test_replay_preserves_agent_archives() {
         "output.txt should persist after replay");
 
     // Verify wg trace still shows the archived agent runs
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["summary"]["agent_run_count"], 1,
         "Agent archives should be accessible via trace after replay");
     let run = &json["agent_runs"][0];
@@ -1952,7 +1952,7 @@ fn test_trace_after_restore() {
     wg_ok(&wg_dir, &["runs", "restore", "run-001"]);
 
     // Trace should show restored state
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["status"], "failed", "Trace should show restored status (failed)");
 
     // Agent archives should still be accessible
@@ -1995,7 +1995,7 @@ fn test_multiple_replay_cycles_preserve_all_archives() {
     wg_ok(&wg_dir, &["replay", "--failed-only"]);
 
     // Trace should show both agent archives
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     assert_eq!(json["summary"]["agent_run_count"], 2,
         "Both agent archives should be visible after multiple replays");
 
@@ -2026,7 +2026,7 @@ more random text
 "#;
     create_agent_archive(&wg_dir, "t1", "2026-02-18T10:00:00Z", "prompt", mixed_output);
 
-    let json = wg_json(&wg_dir, &["trace", "t1"]);
+    let json = wg_json(&wg_dir, &["trace", "show", "t1"]);
     let run = &json["agent_runs"][0];
     assert_eq!(run["tool_calls"], 1, "Should count 1 tool_use call (skip non-JSON lines)");
     assert_eq!(run["turns"], 1, "Should count 1 assistant turn (skip non-JSON lines)");

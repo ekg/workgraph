@@ -63,11 +63,10 @@ pub fn run(dir: &Path, opts: &ReplayOptions, json: bool) -> Result<()> {
 
     for task in graph.tasks() {
         // If subgraph filter is active, skip tasks outside the subgraph
-        if let Some(ref sg) = subgraph_ids {
-            if !sg.contains(&task.id) {
+        if let Some(ref sg) = subgraph_ids
+            && !sg.contains(&task.id) {
                 continue;
             }
-        }
 
         if !opts.tasks.is_empty() {
             // Explicit task list: only seed listed tasks
@@ -114,15 +113,12 @@ pub fn run(dir: &Path, opts: &ReplayOptions, json: bool) -> Result<()> {
     if keep_done_threshold < 1.0 {
         let mut to_keep = Vec::new();
         for task_id in &all_to_reset {
-            if let Some(task) = graph.get_task(task_id) {
-                if task.status == Status::Done {
-                    if let Some(&score) = score_map.get(task_id) {
-                        if score >= keep_done_threshold {
+            if let Some(task) = graph.get_task(task_id)
+                && task.status == Status::Done
+                    && let Some(&score) = score_map.get(task_id)
+                        && score >= keep_done_threshold {
                             to_keep.push(task_id.clone());
                         }
-                    }
-                }
-            }
         }
         for id in to_keep {
             all_to_reset.remove(&id);
@@ -319,13 +315,12 @@ fn collect_subgraph(
     let mut result = HashSet::new();
     let mut queue = vec![root_id.to_string()];
     while let Some(id) = queue.pop() {
-        if result.insert(id.clone()) {
-            if let Some(task) = graph.get_task(&id) {
+        if result.insert(id.clone())
+            && let Some(task) = graph.get_task(&id) {
                 for blocked in &task.blocks {
                     queue.push(blocked.clone());
                 }
             }
-        }
     }
     Ok(result)
 }

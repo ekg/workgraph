@@ -93,6 +93,11 @@ LOOP EDGES (cyclic processes)
   wg show <task-id>           # See loop_iteration to know which pass you're on
   wg loops                    # List all loop edges and their status
 
+  When your loop has converged (work is complete, no more iterations needed):
+  wg done <task-id> --converged
+  This signals early termination — the loop won't fire again. Without it, loops
+  run until max_iterations.
+
 TIPS
 ─────────────────────────────────────────
 • If the coordinator is running: add tasks → it dispatches automatically
@@ -186,7 +191,8 @@ fn json_output() -> serde_json::Value {
             "description": "Loop edges model repeating workflows. A loops_to edge fires when its task completes, resetting a target back to open and incrementing loop_iteration.",
             "create": "wg add \"Revise\" --loops-to write --loop-max 3",
             "inspect": ["wg show <task-id>", "wg loops"],
-            "note": "Agents read loop_iteration from wg show to know which pass they are on"
+            "note": "Agents read loop_iteration from wg show to know which pass they are on",
+            "convergence": "Use wg done <task-id> --converged to signal early termination when the loop's work is complete"
         },
         "tips": [
             "If the coordinator is running: add tasks with dependencies, it dispatches automatically",

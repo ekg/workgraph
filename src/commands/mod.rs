@@ -69,6 +69,9 @@ pub mod spawn;
 pub mod status;
 pub mod structure;
 pub mod trace;
+pub mod trace_extract;
+pub mod trace_function_cmd;
+pub mod trace_instantiate;
 pub mod trajectory;
 pub mod velocity;
 pub mod viz;
@@ -255,7 +258,7 @@ mod provenance_coverage_tests {
             &[], None, None, None, &[], &[], &[], &[], None, None, None, None, None, None, None,
         ).unwrap();
 
-        super::done::run(dir, "prov-done").unwrap();
+        super::done::run(dir, "prov-done", false).unwrap();
         let entries = ops_with_type(dir, "done");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].task_id.as_deref(), Some("prov-done"));
@@ -357,7 +360,7 @@ mod provenance_coverage_tests {
             dir, "Archive target", Some("prov-archive"), None,
             &[], None, None, None, &[], &[], &[], &[], None, None, None, None, None, None, None,
         ).unwrap();
-        super::done::run(dir, "prov-archive").unwrap();
+        super::done::run(dir, "prov-archive", false).unwrap();
 
         super::archive::run(dir, false, None, false, false).unwrap();
         let entries = ops_with_type(dir, "archive");
@@ -414,7 +417,7 @@ mod provenance_coverage_tests {
         // retry
         super::retry::run(dir, "lifecycle").unwrap();
         // done
-        super::done::run(dir, "lifecycle").unwrap();
+        super::done::run(dir, "lifecycle", false).unwrap();
 
         let all = read_all_operations(dir).unwrap();
         let ops: Vec<&str> = all.iter().map(|e| e.op.as_str()).collect();

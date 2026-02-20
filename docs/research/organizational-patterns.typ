@@ -48,6 +48,20 @@ about how to structure work in workgraph.
   deliberately designing roles shapes the task decomposition and
   therefore the output architecture.
 
++ #strong[The provenance log is organizational memory.] `wg trace`
+  records the full causal chain of every workflow—not just what the
+  current state is (stigmergy) but how it got there. This is Luhmann's
+  structural memory: the system's capacity to selectively remember and
+  forget its own history.
+
++ #strong[Replay transforms memory into learning.] `wg replay`
+  re-executes past workflows with different parameters (different
+  models, quality thresholds, task subsets), enabling double-loop
+  learning (Argyris & Schön) and counterfactual reasoning. Successful
+  workflow patterns become organizational routines (Nelson & Winter
+  1982)—reusable functions extracted from traces, the system's
+  equivalent of institutionalized know-how.
+
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
@@ -632,9 +646,542 @@ The autopoietic framing suggests several design principles:
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 6. Cybernetics and Control Theory
+== 6. Trace as Organizational Memory: The Provenance Log
+<trace-as-organizational-memory>
+=== 6.1 Beyond Stigmergic Traces
+<beyond-stigmergic-traces>
+Section 1 established that the task graph is a stigmergic medium—agents
+leave traces (completed tasks, artifacts, status changes) that guide
+subsequent agents. But stigmergic traces are #strong[environmentally
+embedded] and #strong[structurally limited]:
+
+- Stigmergic traces are marks #emph[in the environment]—they tell you
+  #emph[what is] but not #emph[how it got there]
+- Pheromone trails decay; task statuses are overwritten (a task goes
+  from `Open` → `InProgress` → `Done`, and the intermediate states are
+  gone from the graph itself)
+- Stigmergy captures the #emph[current state] but not the
+  #emph[causal chain]
+
+The provenance log (`wg trace`) transcends stigmergy by recording the
+#strong[full operational history]: every mutation to the graph (add,
+claim, done, fail, retry, replay, restore), timestamped, attributed to
+an actor, with operation-specific detail. This is not a trace #emph[in]
+the environment—it is a trace #emph[about] the environment. It is
+metadata, not data.
+
+#align(center)[#table(
+  columns: 4,
+  align: (col, row) => (auto,auto,auto,auto,).at(col),
+  inset: 6pt,
+  [Concept], [What is Recorded], [Persistence], [Analogy],
+  [#strong[Stigmergic trace]],
+  [Current state of the task graph],
+  [Overwritten by next state change],
+  [Pheromone trail (present only)],
+  [#strong[Provenance log]],
+  [Complete history of all state changes],
+  [Append-only, immutable, compressed],
+  [Organizational memory (past preserved)],
+  [#strong[Agent archive]],
+  [Full agent conversation (prompt + output + tool calls)],
+  [Immutable per attempt],
+  [Episodic memory of each work session],
+)
+]
+
+=== 6.2 Luhmann's Structural Memory
+<luhmanns-structural-memory>
+Niklas Luhmann's concept of #strong[structural memory] in social
+systems theory provides the deepest theoretical connection. For
+Luhmann, a social system's memory is not a storehouse of past events
+but the system's capacity to distinguish between #emph[remembering] and
+#emph[forgetting]—to use past experience to constrain future operations
+without becoming overwhelmed by history.
+
+The provenance log is structural memory:
+
+- It records #emph[every] operation but is queried selectively
+  (`wg trace <task-id>` filters to one task's history)
+- The system #emph[forgets] by default (agents don't read the full log)
+  but can #emph[remember] on demand (trace reconstructs the full
+  lifecycle)
+- Log rotation with zstd compression is literally the system managing
+  the cost of memory—old memories are compressed but never deleted
+
+Key Luhmann concepts apply directly:
+
+- #strong[Condensation]: The trace #emph[summary] mode condenses full
+  history into key statistics (duration, tool calls, turns). This is
+  condensation—reducing the complexity of memory to usable form.
+- #strong[Generalization]: When multiple traces reveal the same pattern
+  (e.g., "all failed tasks had >50 turns"), this generalizes across
+  episodes. The trace system provides the raw material for
+  generalization; the human operator (or evolve mechanism) performs the
+  generalization.
+- #strong[Operative memory vs. system memory]: The task graph is
+  operative memory (what the system currently needs to function). The
+  provenance log is system memory (what the system has been through).
+
+=== 6.3 Organizational Learning Theory
+<organizational-learning-theory>
+The provenance log connects to the organizational memory literature:
+
+- #strong[Huber (1991)], "Organizational Learning: The Contributing
+  Processes and the Literatures": Distinguishes four constructs—
+  knowledge acquisition, information distribution, information
+  interpretation, and organizational memory. The provenance log is the
+  #emph[organizational memory] construct—the means by which knowledge
+  is stored for future use.
+- #strong[Walsh & Ungson (1991)], "Organizational Memory": Identify
+  five retention facilities for organizational memory: individuals,
+  culture, transformations, structures, and ecology. The provenance log
+  maps to "transformations"—the system's record of its own
+  decision-making processes.
+- #strong[Levitt & March (1988)], "Organizational Learning":
+  Organizations learn by encoding inferences from history into routines
+  that guide behavior. The provenance log is the raw "history" that,
+  through replay and trace-as-functions (Section 8), gets encoded into
+  reusable routines.
+
+=== 6.4 The Three Layers of Memory in Workgraph
+<three-layers-of-memory>
+Workgraph's memory architecture comprises three distinct layers:
+
+```
+Layer 1: OPERATIVE MEMORY (the task graph)
+  - Current task statuses, dependencies, assignments
+  - Active stigmergic medium
+  - Volatile: overwritten by each state transition
+
+Layer 2: EPISODIC MEMORY (agent archives)
+  - .workgraph/log/agents/<task-id>/<timestamp>/
+  - Full prompt.txt and output.txt per agent run
+  - Records *how* each task was worked on
+  - Multiple episodes per task (retries create new timestamps)
+
+Layer 3: PROCEDURAL MEMORY (provenance log)
+  - .workgraph/log/operations.jsonl
+  - Every graph mutation: add, claim, done, fail, edit, retry,
+    replay, restore
+  - Records *what happened* to the graph as a whole
+  - Append-only, immutable, compressed rotation
+```
+
+=== 6.5 Implications for Practice
+<trace-implications-for-practice>
+- #strong[Trace enables post-mortem analysis.] When a workflow fails,
+  `wg trace --full` reconstructs the complete causal chain—not just
+  "what failed" but "what sequence of events led to failure."
+- #strong[Trace enables attribution.] Every operation records an actor.
+  When multiple agents touch a task (claim → fail → retry → claim →
+  done), trace reveals who did what.
+- #strong[Trace enables temporal reasoning.] Timestamps on every
+  operation allow computing durations, identifying bottlenecks (which
+  stage took longest?), and detecting anomalies (why did this task take
+  10x longer than similar tasks?).
+
+#line(length: 100%, stroke: 0.5pt + luma(180))
+
+== 7. Replay as Organizational Learning: Double-Loop Learning Made Concrete
+<replay-as-organizational-learning>
+=== 7.1 From Memory to Learning
+<from-memory-to-learning>
+Section 6 established that trace creates organizational memory. Replay
+(`wg replay`) is the mechanism by which the system #emph[learns from]
+that memory.
+
+The existing discussion of single-loop vs. double-loop learning
+(Section 9.4) can now be made concrete:
+
+#align(center)[#table(
+  columns: 4,
+  align: (col, row) => (auto,auto,auto,auto,).at(col),
+  inset: 6pt,
+  [Learning Type], [Argyris & Schön], [Workgraph Mechanism],
+  [What Changes],
+  [#strong[Single-loop]],
+  [Adjust actions within existing framework],
+  [Re-assign a failed task to a different agent],
+  [The #emph[agent] changes; the #emph[task structure] stays the same],
+  [#strong[Double-loop]],
+  [Question and modify the framework itself],
+  [`wg evolve` modifies roles and motivations],
+  [The #emph[framework] changes],
+  [#strong[Replay]],
+  [Re-execute the framework with different parameters],
+  [`wg replay --model sonnet --failed-only`],
+  [The #emph[execution context] changes; structure and framework are
+  preserved],
+)
+]
+
+Replay is a #strong[third mode of learning] that doesn't fit neatly
+into Argyris & Schön's taxonomy. It's not single-loop (it doesn't just
+reassign within the existing framework) and it's not double-loop (it
+doesn't modify the framework). It #emph[re-executes] the framework with
+modified parameters. This is closer to #strong[simulation] or
+#strong[counterfactual reasoning]: "What would have happened if we had
+used a different model?" or "What would have happened if we re-ran only
+the failed tasks?"
+
+=== 7.2 Replay Filters as Learning Strategies
+<replay-filters-as-learning-strategies>
+Each replay filter embodies a different organizational learning
+strategy:
+
+#align(center)[#table(
+  columns: 3,
+  align: (col, row) => (auto,auto,auto,).at(col),
+  inset: 6pt,
+  [Filter], [Learning Strategy], [Organizational Analog],
+  [#strong[`--failed-only`]],
+  [Learn from failure: re-execute only what didn't work],
+  [Post-mortem → retry (Toyota's "stop the line")],
+  [#strong[`--below-score <n>`]],
+  [Quality-gate learning: re-execute anything below standard],
+  [Six Sigma—eliminate below-threshold work],
+  [#strong[`--tasks a,b,c`]],
+  [Targeted remediation: re-execute specific tasks],
+  [Surgical correction of known problems],
+  [#strong[`--model <model>`]],
+  [Capability substitution: same work, different capabilities],
+  [Hiring a different specialist for the same role],
+  [#strong[`--keep-done <threshold>`]],
+  [Preserve what works: only redo what's substandard],
+  [Incremental improvement—don't throw away good work],
+  [#strong[`--subgraph <root>`]],
+  [Scope-limited replay: re-execute one branch of work],
+  [Division-level learning (not company-wide reset)],
+  [#strong[(default: all terminal)]],
+  [Clean-slate replay: reset everything],
+  [Complete organizational restructuring],
+)
+]
+
+=== 7.3 Transitive Reset as Causal Reasoning
+<transitive-reset-as-causal-reasoning>
+When `wg replay` resets a task, it also resets all #strong[transitive
+dependents]—tasks that depend (directly or transitively) on the reset
+task. This is not arbitrary; it is #strong[causal reasoning]: if the
+upstream task is invalidated, everything downstream that consumed its
+output is also invalidated.
+
+This connects to:
+
+- #strong[Causal inference in organizational learning] (Argyris 1993):
+  learning requires understanding which actions caused which outcomes.
+  The dependency graph #emph[is] the causal model, and transitive reset
+  #emph[is] causal invalidation.
+- #strong[Garbage in, garbage out]: If a spec task was flawed and an
+  implementation task consumed that flawed spec, replaying only the spec
+  leaves a corrupted implementation in place. Transitive reset prevents
+  this.
+
+=== 7.4 Snapshots as Experimental Records
+<snapshots-as-experimental-records>
+`wg replay` creates a snapshot (`wg runs`) before resetting. This is
+not just a safety mechanism—it is an #strong[experimental record]. Each
+snapshot records:
+
+- The state of the graph before the experiment (run snapshot)
+- What was changed (reset tasks, preserved tasks)
+- The experimental parameters (filter, model override)
+
+This transforms replay from "undo and redo" into "experiment and
+compare":
+
+- `wg runs diff <run-id>` compares the pre-experiment state to the
+  current (post-experiment) state
+- `wg runs restore <run-id>` reverts the experiment if results are
+  worse
+- Multiple replays create a #strong[series of experiments] that can be
+  compared
+
+This is the scientific method applied to workflow execution.
+Hypothesis → experiment → measurement → conclusion. The snapshots are
+the lab notebooks.
+
+=== 7.5 Counterfactual Reasoning
+<counterfactual-reasoning>
+Replay enables a form of counterfactual reasoning that is rare in
+organizational systems: "What if we had done X differently?"
+
+- #strong[Counterfactual 1: Different capability]—`wg replay --model
+  opus` → "What if we had used a more capable model?"
+- #strong[Counterfactual 2: Different scope]—`wg replay --failed-only`
+  → "What if we only redid the parts that failed?"
+- #strong[Counterfactual 3: Quality threshold]—`wg replay --below-score
+  0.8 --keep-done 0.9` → "What if we kept the excellent work and only
+  redid the mediocre work?"
+
+Each counterfactual produces a new execution that can be compared to the
+previous one via `wg runs diff`. This is #strong[double-loop learning
+made empirical]: rather than theoretically questioning governing
+variables, the system can #emph[actually test] alternative governing
+parameters.
+
+=== 7.6 Connection to Simulation Theory
+<connection-to-simulation-theory>
+The organizational simulation literature provides further theoretical
+grounding:
+
+- #strong[March (1991)], "Exploration and Exploitation": Replay with
+  `--model` parameter is #emph[exploration] of the capability space
+  while holding the task structure constant. Replaying with
+  `--keep-done` is #emph[exploitation]—preserving what works and only
+  exploring alternatives for what doesn't.
+- #strong[Gavetti & Levinthal (2000)], "Looking Forward and Looking
+  Back": Forward-looking search (planning new task graphs) vs.
+  backward-looking adaptation (replaying past graphs with
+  modifications). Replay is backward-looking adaptation made concrete.
+
+#line(length: 100%, stroke: 0.5pt + luma(180))
+
+== 8. Trace-as-Functions: From Ad-Hoc Patterns to Organizational Routines
+<trace-as-functions>
+=== 8.1 The Problem: Emergent Patterns Are Invisible
+<emergent-patterns-are-invisible>
+The autopoietic loop (Section 5) produces workflow patterns through
+self-organization. A human operator creates a task graph
+(spec → fanout → implement → validate → refine), runs it, and it works.
+But this pattern is #strong[tacit knowledge]—it lives in the operator's
+head, not in the system. The next time a similar project arises, the
+operator must reconstruct the pattern from scratch.
+
+The trace system (Section 6) makes these patterns #strong[visible]—you
+can see the full execution history. But visibility is not reusability.
+The key insight:
+
+#quote(block: true)[
+A successful trace is a function waiting to be extracted.
+]
+
+=== 8.2 Nelson & Winter's Organizational Routines
+<nelson-winter-organizational-routines>
+Richard Nelson and Sidney Winter's #emph[An Evolutionary Theory of
+Economic Change] (1982) introduced the concept of #strong[organizational
+routines]—regular and predictable patterns of behavior by firms that
+serve as the "genes" of the organization:
+
+- Routines are #strong[skills of the organization]: they encapsulate
+  know-how about how to accomplish tasks
+- Routines are #strong[heritable]: they persist across organizational
+  changes and can be transmitted to new members
+- Routines are #strong[selectable]: routines that produce good outcomes
+  are retained; those that produce poor outcomes are modified or
+  abandoned
+- Routines are the #strong[unit of selection] in organizational
+  evolution, analogous to genes in biological evolution
+
+#align(center)[#table(
+  columns: 2,
+  align: (col, row) => (auto,auto,).at(col),
+  inset: 6pt,
+  [Nelson & Winter Concept], [Workgraph Equivalent],
+  [#strong[Routine]],
+  [A successful workflow pattern: a task graph topology + role
+  assignments that produced good outcomes (high evaluation scores)],
+  [#strong[Routine as organizational memory]],
+  [The trace records the routine's execution; the graph structure
+  records the routine's form],
+  [#strong[Routine replication]],
+  [`wg replay` re-executes a routine; trace extraction (future) could
+  create reusable templates],
+  [#strong[Routine mutation]],
+  [`wg replay --model <X>` replays with modified parameters;
+  `wg evolve` modifies the agent definitions],
+  [#strong[Selection]],
+  [Evaluation scores determine which routines are retained
+  (`--keep-done`) and which are replayed],
+)
+]
+
+=== 8.3 From Trace to Template: The Extraction Pipeline
+<from-trace-to-template>
+The conceptual pipeline for turning a trace into a reusable function
+describes the theoretical framework that current and future features
+serve:
+
+```
+Step 1: EXECUTE
+  A workflow pattern runs successfully
+  (spec → 3x implement → integrate → validate)
+
+Step 2: TRACE
+  wg trace reveals the complete execution record:
+  - What tasks were created, in what order
+  - What dependencies existed
+  - What roles were assigned
+  - What evaluation scores were achieved
+  - How long each stage took
+
+Step 3: IDENTIFY PARAMETERS
+  Which aspects varied (or could vary) across instances:
+  - Number of parallel workers (3 implementers, could be 2 or 5)
+  - Model used (sonnet, could be opus)
+  - Role assignments (implementer role, could be specialist roles)
+  - Task descriptions (specific to this project, would differ)
+
+Step 4: EXTRACT
+  The invariant structure — the topology, dependency pattern,
+  role assignment strategy — becomes a template
+
+Step 5: PARAMETERIZE
+  The variable aspects become parameters:
+  - N (number of parallel workers)
+  - model (which model to use)
+  - description_template (parameterized task descriptions)
+
+Step 6: REPLAY AS FUNCTION CALL
+  wg replay --subgraph <template-root> --model <new-model>
+  re-instantiates the pattern with new parameters
+```
+
+This pipeline is currently partially implemented:
+
+- Steps 1–2: Fully implemented (`wg trace`)
+- Step 3: Manual (human identifies parameters by reading traces)
+- Step 4: Partially implemented (the graph structure #emph[is] the
+  template; `wg replay` preserves structure while resetting execution
+  state)
+- Step 5: `wg replay --model` parameterizes model choice;
+  `--below-score` parameterizes quality threshold
+- Step 6: `wg replay` re-executes; future `wg template` or similar
+  could formalize this
+
+=== 8.4 March's Exploration vs. Exploitation
+<march-exploration-exploitation>
+James March's (1991) framework of #strong[exploration] (search,
+variation, risk-taking, experimentation, discovery) vs.
+#strong[exploitation] (refinement, efficiency, selection,
+implementation, execution) maps precisely onto the trace-to-template
+pipeline:
+
+#align(center)[#table(
+  columns: 3,
+  align: (col, row) => (auto,auto,auto,).at(col),
+  inset: 6pt,
+  [Phase], [March's Framework], [Workgraph Activity],
+  [#strong[First execution]],
+  [Exploration],
+  [Create a new task graph, try a new workflow pattern, use untested
+  role assignments],
+  [#strong[Trace analysis]],
+  [Reflection],
+  [Examine what worked and what didn't; identify the effective pattern],
+  [#strong[Template extraction]],
+  [Transition],
+  [Move from exploration to exploitation by codifying the discovered
+  pattern],
+  [#strong[Replay as function]],
+  [Exploitation],
+  [Re-use the proven pattern efficiently, with parameterized
+  variations],
+)
+]
+
+March warns that organizations tend to over-exploit (stick with what
+worked before) at the expense of exploration (trying new patterns). In
+workgraph, this tension manifests as:
+
+- #strong[Over-exploitation]: Always replaying the same workflow
+  pattern, even when the problem domain has changed
+- #strong[Over-exploration]: Always creating new task graphs from
+  scratch, never building on proven patterns
+- #strong[Balance]: Using replay for known workflow types, fresh task
+  graphs for novel problems
+
+=== 8.5 Feldman & Pentland: Routines as Generative Systems
+<routines-as-generative-systems>
+Martha Feldman and Brian Pentland (2003) reconceptualized organizational
+routines not as fixed, dead patterns but as #strong[generative systems]
+with two aspects:
+
+- #strong[Ostensive aspect]: The abstract, generalized pattern—the
+  "idea" of the routine (e.g., "spec → implement → validate")
+- #strong[Performative aspect]: The specific, concrete enactment of the
+  routine in a particular context (e.g., "spec-auth → implement-auth-1,
+  implement-auth-2 → validate-auth")
+
+#align(center)[#table(
+  columns: 2,
+  align: (col, row) => (auto,auto,).at(col),
+  inset: 6pt,
+  [Feldman & Pentland], [Workgraph],
+  [#strong[Ostensive aspect]],
+  [The abstract workflow topology and role assignment strategy
+  (extractable from trace)],
+  [#strong[Performative aspect]],
+  [Each specific execution (recorded in trace, each `wg runs`
+  snapshot)],
+  [#strong[Routine dynamics]],
+  [Each performance can deviate from the ostensive pattern, and these
+  deviations may feed back to modify the pattern itself],
+)
+]
+
+Workgraph's trace captures the #strong[performative] aspect with high
+fidelity (every operation, every agent conversation). The
+#strong[ostensive] aspect emerges from comparing multiple performances:
+if three different projects all used a spec→fanout→validate pattern, the
+shared topology is the ostensive routine.
+
+The evolve mechanism connects the two: when evaluation scores reveal
+that a performative deviation (e.g., adding a review step) improved
+outcomes, the evolve mechanism can update roles and motivations to
+institutionalize that deviation—modifying the ostensive routine.
+
+=== 8.6 The Evolutionary Cycle
+<the-evolutionary-cycle>
+Synthesizing Nelson & Winter + March + Feldman & Pentland yields a
+unified evolutionary model:
+
+```
+VARIATION (Exploration)
+  New task graph topologies are created
+  New role/motivation combinations are tried
+       │
+       ▼
+SELECTION (Evaluation)
+  Evaluation scores identify successful patterns
+  wg trace reveals which topologies/assignments worked
+       │
+       ▼
+RETENTION (Exploitation)
+  Successful patterns are extracted from traces
+  wg replay re-executes proven patterns
+  Routines (templates) are stored for future use
+       │
+       ▼
+REPLICATION (with Mutation)
+  wg replay --model <X> reproduces the routine with a variation
+  The variation produces new evaluation data
+  The cycle repeats
+       │
+       ▼
+VARIATION (back to top)
+```
+
+This is biological evolution applied to organizational workflow, with
+workgraph primitives as the substrate:
+
+- #strong[Genes] = workflow topologies + role assignments (the ostensive
+  routine)
+- #strong[Phenotype] = the specific execution and its outcomes (the
+  performative routine)
+- #strong[Fitness] = evaluation scores
+- #strong[Reproduction] = replay
+- #strong[Mutation] = replay with parameter changes (`--model`,
+  `--below-score`)
+- #strong[Selection] = evaluation-based filtering (`--keep-done`,
+  `--below-score`)
+
+#line(length: 100%, stroke: 0.5pt + luma(180))
+
+== 9. Cybernetics and Control Theory
 <cybernetics-and-control-theory>
-=== 6.1 Core Concepts
+=== 9.1 Core Concepts
 <core-concepts>
 Cybernetics (from Greek #emph[kybernetes] "steersman") is the study of
 regulatory systems—feedback loops, circular causality, and the science
@@ -678,7 +1225,7 @@ understanding how systems maintain stability in changing environments.
 )
 ]
 
-=== 6.2 The Coordinator as Cybernetic Regulator
+=== 9.2 The Coordinator as Cybernetic Regulator
 <the-coordinator-as-cybernetic-regulator>
 The workgraph coordinator operates a control loop:
 
@@ -715,7 +1262,7 @@ regulator] (Cannon/Ashby): The coordinator maintains steady throughput
 despite perturbations (agent failures, new tasks added, changing
 priorities)
 
-=== 6.3 Ashby’s Law of Requisite Variety
+=== 9.3 Ashby’s Law of Requisite Variety
 <ashbys-law-of-requisite-variety>
 Ashby’s Law states: #strong["Only variety can absorb variety."] A
 regulator must have at least as many response options as the system has
@@ -755,7 +1302,7 @@ to match the growing variety of disturbances (V).
 )
 ]
 
-=== 6.4 Single-Loop vs. Double-Loop Learning
+=== 9.4 Single-Loop vs. Double-Loop Learning
 <single-loop-vs.-double-loop-learning>
 #align(center)[#table(
   columns: 3,
@@ -784,9 +1331,9 @@ plateau in performance.
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 7. The Viable System Model
+== 10. The Viable System Model
 <the-viable-system-model>
-=== 7.1 Beer’s Five Systems
+=== 10.1 Beer’s Five Systems
 <beers-five-systems>
 Stafford Beer’s Viable System Model (VSM) describes the organizational
 structure of any autonomous system capable of surviving in a changing
@@ -834,7 +1381,7 @@ The critical homeostatic balance is the #strong[S3-S4 homeostat]: S3
 wants stability and optimization of current operations; S4 wants
 exploration and adaptation. S5 mediates this tension.
 
-=== 7.2 Mapping to Workgraph
+=== 10.2 Mapping to Workgraph
 <mapping-to-workgraph>
 #align(center)[#table(
   columns: 2,
@@ -876,7 +1423,7 @@ exploration and adaptation. S5 mediates this tension.
 )
 ]
 
-=== 7.3 The S3-S4 Balance in Practice
+=== 10.3 The S3-S4 Balance in Practice
 <the-s3-s4-balance-in-practice>
 In workgraph, the S3-S4 tension manifests as:
 
@@ -892,9 +1439,9 @@ evolver’s own role) is the S5 function enforcing identity preservation.
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 8. The Principal-Agent Problem
+== 11. The Principal-Agent Problem
 <the-principal-agent-problem>
-=== 8.1 The Problem
+=== 11.1 The Problem
 <the-problem>
 The principal-agent problem, formalized by Ross (1973) and Jensen &
 Meckling (1976), arises when a #strong[principal] delegates work to an
@@ -922,7 +1469,7 @@ Two core information asymmetries:
 Agency costs (Jensen & Meckling 1976) \= Monitoring costs + Bonding
 costs + Residual loss.
 
-=== 8.2 Workgraph as an Agency Relationship
+=== 11.2 Workgraph as an Agency Relationship
 <workgraph-as-an-agency-relationship>
 This mapping is unusually precise because workgraph literally has
 primitives called "agents," "evaluations," and "motivations"—the
@@ -971,7 +1518,7 @@ vocabulary of agency theory.
 )
 ]
 
-=== 8.3 Mechanism Design Implications
+=== 11.3 Mechanism Design Implications
 <mechanism-design-implications>
 Agency theory suggests specific design principles for workgraph:
 
@@ -994,9 +1541,9 @@ Agency theory suggests specific design principles for workgraph:
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 9. Conway’s Law and the Inverse Conway Maneuver
+== 12. Conway’s Law and the Inverse Conway Maneuver
 <conways-law-and-the-inverse-conway-maneuver>
-=== 9.1 Conway’s Law
+=== 12.1 Conway’s Law
 <conways-law>
 #quote(block: true)[
 "Organizations which design systems are constrained to produce designs
@@ -1010,7 +1557,7 @@ Therefore, the interfaces between the system’s parts will mirror the
 communication channels between the teams. This is a #emph[constraint],
 not a choice.
 
-=== 9.2 The Inverse Conway Maneuver
+=== 12.2 The Inverse Conway Maneuver
 <the-inverse-conway-maneuver>
 Coined by Jonny LeRoy and Matt Simons (2010): if org structure shapes
 system architecture, then #strong[deliberately designing org structure
@@ -1018,7 +1565,7 @@ can drive desired system architecture]. Rather than accepting that your
 system mirrors your org chart, you restructure teams to produce the
 architecture you want.
 
-=== 9.3 Mapping to Workgraph
+=== 12.3 Mapping to Workgraph
 <mapping-to-workgraph-1>
 #align(center)[#table(
   columns: 2,
@@ -1041,7 +1588,7 @@ architecture you want.
 )
 ]
 
-=== 9.4 The Inverse Conway Maneuver in Practice
+=== 12.4 The Inverse Conway Maneuver in Practice
 <the-inverse-conway-maneuver-in-practice>
 #strong[Example: Microservices via roles]
 
@@ -1070,9 +1617,9 @@ the roles first, and the task graph (and resulting code) will follow.
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 10. Team Topologies
+== 13. Team Topologies
 <team-topologies>
-=== 10.1 The Framework
+=== 13.1 The Framework
 <the-framework>
 Team Topologies (Skelton & Pais, 2019) provides a practical framework
 for organizing technology teams, built on Conway’s Law and cognitive
@@ -1126,7 +1673,7 @@ load theory.
 )
 ]
 
-=== 10.2 Mapping to Workgraph Roles
+=== 13.2 Mapping to Workgraph Roles
 <mapping-to-workgraph-roles>
 #align(center)[#table(
   columns: 2,
@@ -1165,7 +1712,7 @@ load theory.
 )
 ]
 
-=== 10.3 Practical Guidance for Workgraph Users
+=== 13.3 Practical Guidance for Workgraph Users
 <practical-guidance-for-workgraph-users>
 + #strong[Most roles should be stream-aligned.] If you have a "build the
   feature" type of work, that’s stream-aligned. Don’t over-specialize.
@@ -1184,9 +1731,9 @@ load theory.
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 11. Organizational Theory Primitives
+== 14. Organizational Theory Primitives
 <organizational-theory-primitives>
-=== 11.1 Division of Labor
+=== 14.1 Division of Labor
 <division-of-labor>
 Adam Smith’s pin factory (1776): splitting work into specialized steps
 increases productivity. In workgraph, this maps to:
@@ -1203,7 +1750,7 @@ The tradeoff: over-specialization increases coordination costs (more
 This is the fundamental tension in organizational design, and it applies
 directly to workgraph agency design.
 
-=== 11.2 Span of Control
+=== 14.2 Span of Control
 <span-of-control>
 The number of subordinates a manager can effectively supervise. In
 workgraph: the number of agents a single coordinator tick can
@@ -1214,7 +1761,7 @@ Research suggests 5-9 direct reports as optimal for human managers
 agents can the coordinator monitor, evaluate, and evolve without losing
 oversight quality.
 
-=== 11.3 Coordination Costs
+=== 14.3 Coordination Costs
 <coordination-costs>
 Every dependency edge (`blocked_by`) is a coordination point. The total
 coordination cost of a task graph scales with the number of edges, not
@@ -1228,7 +1775,7 @@ serial chain, more agents are wasted. If the graph is a wide diamond
 (fork-join), more agents directly increase throughput—up to the point
 where coordination overhead dominates.
 
-=== 11.4 Transaction Cost Economics
+=== 14.4 Transaction Cost Economics
 <transaction-cost-economics>
 Oliver Williamson’s Transaction Cost Economics (1975, 1985) asks: when
 should work be done inside the organization ("make") vs. outside
@@ -1261,39 +1808,43 @@ represents this make-vs-buy boundary.
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 12. Synthesis: Cross-Cutting Connections
+== 15. Synthesis: Cross-Cutting Connections
 <synthesis-cross-cutting-connections>
 These frameworks are not independent—they are deeply interconnected
 views of the same underlying organizational dynamics.
 
-=== 12.1 The Grand Unification
+=== 15.1 The Grand Unification
 <the-grand-unification>
 ```
-                    STRUCTURE                        DYNAMICS
-                    --------                         --------
-Conway's Law ───── Role ontology ─────────── Inverse Conway Maneuver
+                    STRUCTURE                    DYNAMICS                     MEMORY
+                    --------                     --------                     ------
+Conway's Law ───── Role ontology ──────── Inverse Conway Maneuver
                        │                            │
-Team Topologies ── Team types ────────────── Interaction mode evolution
+Team Topologies ── Team types ─────────── Interaction mode evolution
                        │                            │
-Workflow Patterns ─ blocked_by edges ────── Coordinator dispatch logic
+Workflow Patterns ─ blocked_by edges ──── Coordinator dispatch logic
                        │                            │
-Division of Labor ─ Task decomposition ──── Pipeline & Fork-Join
+Division of Labor ─ Task decomposition ── Pipeline & Fork-Join
                        │                            │
-                       ▼                            ▼
-                   THE TASK GRAPH              THE EVOLVE LOOP
-                       │                            │
-Stigmergy ──────── Shared medium ──────────── Self-organizing traces
-                       │                            │
-Agency Theory ──── Principal delegates ────── Monitor + Evolve = Alignment
-                       │                            │
-Cybernetics ────── Feedback loops ─────────── Requisite Variety
-                       │                            │
-VSM ────────────── S1-S5 hierarchy ────────── S3-S4 balance
-                       │                            │
-Autopoiesis ────── Self-production ────────── Operational closure
+                       ▼                            ▼                            ▼
+                   THE TASK GRAPH              THE EVOLVE LOOP             THE TRACE
+                       │                            │                         │
+Stigmergy ──────── Shared medium ─────── Self-organizing traces ──── Provenance log
+                       │                            │                         │
+Agency Theory ──── Principal delegates ── Monitor + Evolve = Align ── Audit trail
+                       │                            │                         │
+Cybernetics ────── Feedback loops ─────── Requisite Variety ────────── Counterfactual replay
+                       │                            │                         │
+VSM ────────────── S1-S5 hierarchy ────── S3-S4 balance ──────────── S3* audit records
+                       │                            │                         │
+Autopoiesis ────── Self-production ────── Operational closure ─────── Structural memory
+                       │                            │                         │
+Org. Learning ──── Routines ──────────── Double-loop learning ────── Replay experiments
+                       │                            │                         │
+Nelson & Winter ── Organizational genes ─ Variation + Selection ──── Trace-as-function
 ```
 
-=== 12.2 Key Structural Identities
+=== 15.2 Key Structural Identities
 <key-structural-identities>
 Several deep identities connect these frameworks:
 
@@ -1330,11 +1881,39 @@ Several deep identities connect these frameworks:
   cybernetic (feedback-driven regulation). This is the single most
   theoretically dense primitive in workgraph.
 
++ #strong[Stigmergy + Trace + Organizational Memory]: Stigmergy creates
+  #emph[present] traces in the environment; the provenance log creates
+  #emph[persistent] traces about the environment. Stigmergy is the
+  system's working memory; trace is its long-term memory. Together they
+  provide the memory architecture for the autopoietic system (Luhmann's
+  structural memory).
+
++ #strong[Replay + Double-Loop Learning + Autopoiesis]: Replay is
+  double-loop learning operationalized—the system can question its own
+  execution by re-running it with different parameters. Combined with
+  autopoiesis: the self-producing system can now re-produce itself
+  under counterfactual conditions, testing whether its self-production
+  is robust to parameter changes.
+
++ #strong[Trace-as-Function + Nelson & Winter + March]: The extraction
+  of reusable routines from traces is the evolutionary retention
+  mechanism (Nelson & Winter). The choice between replaying a proven
+  routine and creating a new task graph is the exploration/exploitation
+  tradeoff (March). The evolve mechanism modifies the routines' agent
+  components, while replay modifies their execution parameters—two
+  orthogonal axes of adaptation.
+
++ #strong[Runs + VSM S3\* + Experimental Records]: Run snapshots serve
+  dual purpose: as S3\* audit records (independent verification of what
+  state the system was in) and as experimental records (enabling
+  comparison of different execution strategies). This connects the
+  VSM's audit function to the scientific method.
+
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 13. Practical Recommendations
+== 16. Practical Recommendations
 <practical-recommendations>
-=== 13.1 Agency Design Checklist
+=== 16.1 Agency Design Checklist
 <agency-design-checklist>
 Based on the theoretical frameworks above, here is a checklist for
 designing a workgraph agency:
@@ -1375,7 +1954,7 @@ designing a workgraph agency:
 )
 ]
 
-=== 13.2 Pattern Selection Guide
+=== 16.2 Pattern Selection Guide
 <pattern-selection-guide>
 #align(center)[#table(
   columns: 3,
@@ -1403,7 +1982,7 @@ designing a workgraph agency:
 )
 ]
 
-=== 13.3 Anti-Patterns
+=== 16.3 Anti-Patterns
 <anti-patterns>
 #align(center)[#table(
   columns: 4,
@@ -1443,16 +2022,17 @@ designing a workgraph agency:
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 14. Appendix: Comparative Tables
+== 17. Appendix: Comparative Tables
 <appendix-comparative-tables>
 === Framework-to-Primitive Mapping
 <framework-to-primitive-mapping>
 #align(center)[#table(
-  columns: 10,
-  align: (col, row) => (auto,auto,auto,auto,auto,auto,auto,auto,auto,auto,).at(col),
+  columns: 13,
+  align: (col, row) => (auto,auto,auto,auto,auto,auto,auto,auto,auto,auto,auto,auto,auto,).at(col),
   inset: 6pt,
   [Framework], [Tasks], [`blocked_by`], [`loops_to`], [Roles],
   [Motivations], [Agents], [Coordinator], [Evaluations], [Evolve],
+  [Trace], [Replay], [Runs],
   [Stigmergy],
   [Traces in environment],
   [Sematectonic coordination],
@@ -1463,6 +2043,9 @@ designing a workgraph agency:
   [—],
   [Marker traces],
   [Self-reinforcing trails],
+  [Long-term trace memory],
+  [Trail reinforcement],
+  [—],
   [Workflow Patterns],
   [Activities],
   [Control-flow edges],
@@ -1473,6 +2056,9 @@ designing a workgraph agency:
   [Engine],
   [—],
   [—],
+  [Execution history],
+  [WCP reset/restart],
+  [—],
   [Fork-Join/MapReduce],
   [Map/fork units],
   [Join barriers],
@@ -1481,6 +2067,9 @@ designing a workgraph agency:
   [—],
   [Worker threads],
   [Scheduler],
+  [—],
+  [—],
+  [—],
   [—],
   [—],
   [Autopoiesis],
@@ -1493,6 +2082,9 @@ designing a workgraph agency:
   [—],
   [Cognition],
   [Self-production],
+  [Structural memory],
+  [Self-reproduction with variation],
+  [Experimental branching],
   [Cybernetics],
   [System states],
   [Causal chains],
@@ -1503,6 +2095,9 @@ designing a workgraph agency:
   [Regulator (OODA)],
   [Feedback signal],
   [Variety amplification],
+  [Observation record],
+  [Counterfactual testing],
+  [Experimental control],
   [VSM],
   [S1 operations],
   [S2 coordination],
@@ -1513,6 +2108,9 @@ designing a workgraph agency:
   [S3 control],
   [S3\* audit],
   [S4 intelligence],
+  [S3\* audit records],
+  [S4 adaptation mechanism],
+  [S3\* verification baseline],
   [Agency Theory],
   [Delegated work],
   [Contract terms],
@@ -1523,6 +2121,9 @@ designing a workgraph agency:
   [Principal],
   [Monitoring],
   [Incentive alignment],
+  [Monitoring records],
+  [Incentive recalibration],
+  [Contract history],
   [Conway’s Law],
   [System components],
   [Interfaces],
@@ -1533,6 +2134,9 @@ designing a workgraph agency:
   [—],
   [—],
   [Inverse Conway],
+  [Architecture audit trail],
+  [—],
+  [—],
   [Team Topologies],
   [Work streams],
   [Team interactions],
@@ -1543,6 +2147,9 @@ designing a workgraph agency:
   [—],
   [—],
   [Topology evolution],
+  [—],
+  [—],
+  [—],
   [Org Theory],
   [Labor units],
   [Coordination channels],
@@ -1553,6 +2160,35 @@ designing a workgraph agency:
   [Manager],
   [Performance review],
   [Restructuring],
+  [Institutional memory],
+  [Restructuring mechanism],
+  [—],
+  [Org Learning],
+  [Routine enactments],
+  [Causal dependencies],
+  [Iterative refinement],
+  [Routines (ostensive)],
+  [Behavioral norms],
+  [Routine performers],
+  [Learning coordinator],
+  [Episodic memory],
+  [Double-loop adaptation],
+  [Episodic memory],
+  [Double-loop re-execution],
+  [Experimental record],
+  [Evolutionary Theory],
+  [Phenotype expression],
+  [Selection pressure],
+  [Generational cycle],
+  [Organizational genes],
+  [Selection criteria],
+  [Organisms],
+  [Selection mechanism],
+  [Fitness evaluation],
+  [Variation + selection],
+  [Fitness record],
+  [Reproduction with mutation],
+  [Snapshot of prior generation],
 )
 ]
 
@@ -1598,12 +2234,28 @@ designing a workgraph agency:
   variety amplification), VSM (S4 intelligence), Agency Theory
   (incentive alignment)],
   [The adaptation mechanism],
+  [#strong[Trace]],
+  [Org Learning (organizational memory—Huber, Walsh & Ungson),
+  Autopoiesis (structural memory—Luhmann), Cybernetics (observation
+  record), VSM (S3\* audit), Agency Theory (monitoring records),
+  Stigmergy (persistent traces)],
+  [The memory mechanism],
+  [#strong[Replay]],
+  [Org Learning (double-loop learning—Argyris & Schön;
+  exploration/exploitation—March), Autopoiesis (self-reproduction with
+  variation), Evolutionary Theory (reproduction with mutation—Nelson &
+  Winter), Cybernetics (counterfactual testing)],
+  [The learning mechanism],
+  [#strong[Runs]],
+  [VSM (S3\* audit baseline), Org Learning (experimental records),
+  Evolutionary Theory (generational snapshots)],
+  [The experimental record],
 )
 ]
 
 #line(length: 100%, stroke: 0.5pt + luma(180))
 
-== 15. Sources
+== 18. Sources
 <sources>
 === Organizational Theory
 <organizational-theory>
@@ -1677,6 +2329,31 @@ designing a workgraph agency:
   Press.
 - Mingers, J. (2002). "Can Social Systems Be Autopoietic?"
   #emph[Sociological Review], 50(2), 278-299.
+
+=== Organizational Learning & Evolutionary Theory
+<organizational-learning-evolutionary-theory>
+- Huber, G.P. (1991). "Organizational Learning: The Contributing
+  Processes and the Literatures." #emph[Organization Science], 2(1),
+  88–115.
+- Walsh, J.P. & Ungson, G.R. (1991). "Organizational Memory."
+  #emph[Academy of Management Review], 16(1), 57–91.
+- Levitt, B. & March, J.G. (1988). "Organizational Learning."
+  #emph[Annual Review of Sociology], 14, 319–340.
+- March, J.G. (1991). "Exploration and Exploitation in Organizational
+  Learning." #emph[Organization Science], 2(1), 71–87.
+- Argyris, C. (1993). #emph[Knowledge for Action: A Guide to Overcoming
+  Barriers to Organizational Change]. Jossey-Bass.
+- Nelson, R.R. & Winter, S.G. (1982). #emph[An Evolutionary Theory of
+  Economic Change]. Belknap Press / Harvard University Press.
+- Feldman, M.S. & Pentland, B.T. (2003). "Reconceptualizing
+  Organizational Routines as a Source of Flexibility and Change."
+  #emph[Administrative Science Quarterly], 48(1), 94–118.
+- Pentland, B.T. & Feldman, M.S. (2005). "Organizational Routines as a
+  Unit of Analysis." #emph[Industrial and Corporate Change], 14(5),
+  793–815.
+- Gavetti, G. & Levinthal, D. (2000). "Looking Forward and Looking
+  Back: Cognitive and Experiential Search." #emph[Administrative Science
+  Quarterly], 45(1), 113–137.
 
 === Cybernetics
 <cybernetics>

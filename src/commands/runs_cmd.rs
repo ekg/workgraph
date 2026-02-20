@@ -216,37 +216,35 @@ pub fn run_diff(dir: &Path, run_id: &str, json: bool) -> Result<()> {
                 "total_changes": diffs.len(),
             }))?
         );
+    } else if diffs.is_empty() {
+        println!("No differences between current graph and {}", run_id);
     } else {
-        if diffs.is_empty() {
-            println!("No differences between current graph and {}", run_id);
-        } else {
-            println!("Diff: current vs {} ({} change(s)):\n", run_id, diffs.len());
-            for d in &diffs {
-                match d.change.as_str() {
-                    "status_changed" => {
-                        println!(
-                            "  ~ {} : {} -> {}",
-                            d.id,
-                            d.snapshot_status.as_deref().unwrap_or("?"),
-                            d.current_status.as_deref().unwrap_or("?")
-                        );
-                    }
-                    "removed" => {
-                        println!(
-                            "  - {} [{}]",
-                            d.id,
-                            d.snapshot_status.as_deref().unwrap_or("?")
-                        );
-                    }
-                    "added" => {
-                        println!(
-                            "  + {} [{}]",
-                            d.id,
-                            d.current_status.as_deref().unwrap_or("?")
-                        );
-                    }
-                    _ => {}
+        println!("Diff: current vs {} ({} change(s)):\n", run_id, diffs.len());
+        for d in &diffs {
+            match d.change.as_str() {
+                "status_changed" => {
+                    println!(
+                        "  ~ {} : {} -> {}",
+                        d.id,
+                        d.snapshot_status.as_deref().unwrap_or("?"),
+                        d.current_status.as_deref().unwrap_or("?")
+                    );
                 }
+                "removed" => {
+                    println!(
+                        "  - {} [{}]",
+                        d.id,
+                        d.snapshot_status.as_deref().unwrap_or("?")
+                    );
+                }
+                "added" => {
+                    println!(
+                        "  + {} [{}]",
+                        d.id,
+                        d.current_status.as_deref().unwrap_or("?")
+                    );
+                }
+                _ => {}
             }
         }
     }

@@ -861,8 +861,8 @@ exit $EXIT_CODE"#,
         Ok(child) => child,
         Err(e) => {
             // Rollback the claim
-            if let Ok(mut rollback_graph) = load_graph(&graph_path) {
-                if let Some(t) = rollback_graph.get_task_mut(eval_task_id) {
+            if let Ok(mut rollback_graph) = load_graph(&graph_path)
+                && let Some(t) = rollback_graph.get_task_mut(eval_task_id) {
                     t.status = Status::Open;
                     t.started_at = None;
                     t.assigned = None;
@@ -873,7 +873,6 @@ exit $EXIT_CODE"#,
                     });
                     let _ = save_graph(&rollback_graph, &graph_path);
                 }
-            }
             return Err(anyhow::anyhow!("Failed to spawn eval process: {}", e));
         }
     };
