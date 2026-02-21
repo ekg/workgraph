@@ -1,4 +1,4 @@
-= The Task Graph
+= The Task Graph <sec-task-graph>
 
 Work is structure. A project without structure is a list—and lists lie. They hide the fact that you cannot deploy before you test, cannot test before you build, cannot build before you design. A list says "here are things to do." A graph says "here is the order in which reality permits you to do them."
 
@@ -28,6 +28,7 @@ A task is the atom of work. It has an identity, a lifecycle, and a body of metad
     [`model`], [Preferred AI model (haiku, sonnet, opus). Overrides coordinator and agent defaults.],
     [`verify`], [Verification criteria—if set, the task requires review before it can be marked done.],
     [`agent`], [Content-hash ID binding an agency agent identity to this task.],
+    [`visibility`], [Controls what information crosses organizational boundaries during trace exports. One of `internal` (default—organization only), `public` (sanitized sharing without agent output or logs), or `peer` (richer detail for trusted peers, including evaluations and patterns).],
     [`log`], [Append-only progress entries with timestamps and optional actor attribution.],
   ),
   caption: [Task fields. Every field except `id`, `title`, and `status` is optional.],
@@ -218,7 +219,15 @@ Every loop edge must specify `max_iterations`. There are no unbounded loops. Whe
 
 This is a safety property. A guard condition with a logic error could fire indefinitely; `max_iterations` guarantees that every cycle terminates. The cap is per-edge—if multiple loop edges point at the same target, each has its own limit.
 
-An agent can also signal convergence explicitly. Running `wg done <task-id> --converged` tags the task with `converged`, causing the loop evaluator to skip firing—even if iterations remain and guard conditions are met. This lets agents terminate loops early when the work is complete, without waiting for the iteration cap.
+=== Early Convergence
+
+The iteration cap is a ceiling, not a target. In practice, iterative work often converges before the maximum is reached—a refine agent determines the output is stable, a review loop approves on the third pass instead of the fifth, a monitoring check finds the system healthy. Running all remaining iterations after convergence wastes compute and delays downstream work.
+
+An agent signals convergence by running `wg done <task-id> --converged`. This marks the task as done and adds a `"converged"` tag. When the loop evaluator runs, it checks the source task for this tag before evaluating any loop edges. If the tag is present, all loop edges from that task are skipped—the loop does not fire, regardless of guard conditions or remaining iterations. Downstream tasks proceed immediately.
+
+The convergence tag is durable but not permanent. Running `wg retry` on a converged task clears the tag along with resetting the task to open, so the loop can fire again if needed. This means convergence is an agent's assertion about _this_ iteration's outcome, not a permanent lock on the loop structure.
+
+The coordinator supports this mechanism in the dispatch cycle: when rendering a prompt for a task that is the source of loop edges, it includes a note about the `--converged` flag, informing the agent that early termination is available. The agent decides—the system does not guess.
 
 === Loop Delays
 
@@ -290,6 +299,12 @@ A linear chain: A blocks B blocks C blocks D. Each task becomes ready only when 
 
 A forward chain with a loop edge, as described above. The cycle executes repeatedly until a guard condition breaks it or the iteration cap is reached. Review loops are the canonical example of intentional cycles.
 
+=== Trace Functions: Reusable Patterns
+
+When a workflow pattern proves useful—a review loop that consistently produces good results, a map/reduce pipeline tuned for a particular domain—it can be extracted from a completed trace into a reusable template called a _trace function_. The `wg trace extract` command takes a completed task and its subgraph, captures the task structure, dependencies, loop edges, and guards, and parameterizes the variable parts: feature names, file paths, descriptions, and thresholds become named input variables. The result is stored as YAML in `.workgraph/functions/`.
+
+Instantiating a trace function with `wg trace instantiate` reverses the process. It takes a function name and a set of input values, substitutes them into the template, and creates concrete tasks in the graph with proper dependency wiring. The original pattern's structure is preserved—its fan-out topology, its loop bounds, its guard conditions—but applied to new work. Trace functions can also be shared across projects: the `--from` flag accepts a peer name or file path, enabling teams to import proven workflows from one another.
+
 == Graph Analysis
 
 Workgraph provides several analysis tools that read the graph structure and compute derived properties. These are instruments, not concepts—they report on the graph rather than define it.
@@ -304,6 +319,8 @@ Workgraph provides several analysis tools that read the graph structure and comp
 
 *Forecast.* Projected completion date based on remaining work, estimated velocity, and dependency structure.
 
+*Visualization.* `wg viz` renders the graph as text. The `--graph` format produces a 2D spatial layout using Unicode box-drawing characters, positioning tasks by their dependency depth—roots at the top, leaf tasks at the bottom. Nodes are color-coded by status and connected by vertical lines that split at fan-out points and merge at fan-in points. The layout algorithm assigns layers via topological sort, then orders nodes within each layer to minimize edge crossings.
+
 These tools share a common pattern: they traverse the graph using `blocked_by` edges (and their inverse), respect the visited-set pattern to handle cycles safely, and report on the structure without modifying it.
 
 == Storage
@@ -312,10 +329,7 @@ The graph is stored as JSONL—one JSON object per line, one node per object. A 
 
 #figure(
   raw(block: true, lang: "jsonl",
-`{"kind":"task","id":"write-draft","title":"Write draft","status":"open","loops_to":[]}
-{"kind":"task","id":"review-draft","title":"Review draft","status":"open","blocked_by":["write-draft"]}
-{"kind":"task","id":"revise-draft","title":"Revise","status":"open","blocked_by":["review-draft"],"loops_to":[{"target":"write-draft","guard":{"TaskStatus":{"task":"review-draft","status":"failed"}},"max_iterations":5}]}
-{"kind":"task","id":"publish","title":"Publish","status":"open","blocked_by":["revise-draft"]}`
+"{\"kind\":\"task\",\"id\":\"write-draft\",\"title\":\"Write draft\",\"status\":\"open\",\"loops_to\":[]}\n{\"kind\":\"task\",\"id\":\"review-draft\",\"title\":\"Review draft\",\"status\":\"open\",\"blocked_by\":[\"write-draft\"]}\n{\"kind\":\"task\",\"id\":\"revise-draft\",\"title\":\"Revise\",\"status\":\"open\",\"blocked_by\":[\"review-draft\"],\"loops_to\":[{\"target\":\"write-draft\",\"guard\":{\"TaskStatus\":{\"task\":\"review-draft\",\"status\":\"failed\"}},\"max_iterations\":5}]}\n{\"kind\":\"task\",\"id\":\"publish\",\"title\":\"Publish\",\"status\":\"open\",\"blocked_by\":[\"revise-draft\"]}"
   ),
   caption: [A graph file in JSONL format. Each line is a self-contained node.],
 ) <jsonl-example>
@@ -323,6 +337,8 @@ The graph is stored as JSONL—one JSON object per line, one node per object. A 
 JSONL has three virtues for this purpose. It is human-readable—you can inspect and edit it with any text editor. It is version-control-friendly—adding or modifying a task changes one line, producing clean diffs. And it supports atomic writes with file locking—concurrent processes cannot corrupt the graph because every write acquires an exclusive lock, rewrites the file, and releases.
 
 The graph file lives at `.workgraph/graph.jsonl` and is the canonical state of the project. There is no database, no server dependency. Everything reads from and writes to this file. The service daemon, when running, holds no state beyond what the file contains—it can be killed and restarted without loss.
+
+Alongside the graph file, the operations log (`operations.jsonl`) records every mutation: task creation, status changes, dependency additions, loop firings, evaluations. This log is the project's trace—its organizational memory. The `wg trace` command queries it. `wg trace export` produces a filtered, shareable snapshot with visibility controls: an `internal` export includes everything, a `public` export sanitizes (omitting agent output and logs), and a `peer` export provides richer detail for trusted collaborators. `wg trace import` ingests a peer's export, enabling cross-boundary knowledge transfer. The graph file tells you where the project _is_. The operations log tells you how it got there.
 
 ---
 

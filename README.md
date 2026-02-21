@@ -72,6 +72,9 @@ wg add "Quick formatting fix" --model haiku
 
 # Task requiring review before completion
 wg add "Security audit" --verify "All findings documented with severity ratings"
+
+# Task with visibility for cross-org sharing
+wg add "Public API design" --visibility public
 ```
 
 ### 3. Edit tasks after creation
@@ -518,7 +521,7 @@ wg assign my-task <agent-hash>
 2. **Motivations** define trade-offs and constraints ("Careful" → prioritizes reliability, rejects untested code)
 3. **Agents** pair one role + one motivation into a named identity
 4. **Assignment** binds an agent to a task — its identity is injected at spawn time
-5. **Evaluation** scores completed tasks across four dimensions (correctness, completeness, efficiency, style adherence)
+5. **Evaluation** scores completed tasks across four dimensions, with a `source` field distinguishing internal LLM assessments from external signals (CI results, outcome data, peer reviews)
 6. **Evolution** uses performance data to create new roles/motivations and retire weak ones
 
 ### Automation
@@ -542,6 +545,19 @@ wg evolve                              # full evolution cycle
 wg evolve --strategy mutation --budget 3  # targeted changes
 wg evolve --dry-run                    # preview without applying
 ```
+
+### Federation
+
+Share agency entities across projects:
+
+```bash
+wg agency remote add partner /path/to/other/project/.workgraph/agency
+wg agency scan partner              # see what they have
+wg agency pull partner              # import their roles, motivations, agents
+wg agency push partner              # export yours to them
+```
+
+Performance records merge during transfer — evaluations are deduplicated and averages recalculated. Content-hash IDs make this natural: the same entity has the same ID everywhere.
 
 See [docs/AGENCY.md](docs/AGENCY.md) for the full agency system documentation.
 
@@ -597,6 +613,7 @@ When the source task completes (via `wg done`), each of its loop edges is evalua
 3. **Re-activate** — the target is reset to `open`, its `loop_iteration` is incremented, and any `assigned`/`started_at`/`completed_at` fields are cleared.
 4. **Propagate** — intermediate tasks between the target and source in the dependency chain are also re-opened. This happens through the dependency system, not the loop edge itself — resetting the target breaks the `blocked_by` chain downstream, so tasks that were `done` from a previous iteration get re-opened to run again.
 5. **Delay** — if `--loop-delay` is set, the target gets a `ready_after` timestamp so it won't be dispatched until the delay elapses.
+6. **Convergence** — an agent can signal `wg done <task> --converged` to prevent the loop from firing, even if iterations remain. Useful when the work has reached a stable state before hitting `max_iterations`.
 
 ### Creating loop edges
 
@@ -652,9 +669,54 @@ wg show <task-id>      # Shows loop edges and current iteration on a task
 wg viz                 # Loop edges appear as dashed lines in graph output
 ```
 
+## Trace & sharing
+
+Workgraph records every operation in a trace log — the project's organizational memory. Use it for introspection, sharing, and workflow reuse.
+
+### Watching events
+
+```bash
+wg watch                             # stream events to terminal
+wg watch --event task_state          # only task state changes
+wg watch --event evaluation          # only evaluations
+wg watch --task my-task              # events for a specific task
+wg watch --replay 20                 # include 20 most recent historical events
+```
+
+The event stream enables external adapters — a CI integration, a Slack bot, or a monitoring tool can observe workgraph events and react without polling.
+
+### Exporting and importing traces
+
+Tasks carry a `visibility` field (`internal`, `public`, or `peer`) that controls what crosses organizational boundaries:
+
+```bash
+wg trace export --visibility public   # sanitized for open sharing (structure only)
+wg trace export --visibility peer     # richer detail for trusted peers
+wg trace import peer-export.json      # import a peer's trace as read-only context
+```
+
+### Trace functions (workflow templates)
+
+Extract proven workflows into reusable templates:
+
+```bash
+wg trace extract impl-feature --name impl-feature  # extract pattern from completed work
+wg trace instantiate impl-feature \
+  --input feature_name=auth --input description="Add OAuth"  # create tasks from pattern
+wg trace list-functions              # list available templates
+wg trace show-function impl-feature  # inspect a template
+```
+
+### Trace visualization
+
+```bash
+wg trace show <task-id>              # execution history of a task
+wg trace show <task-id> --animate    # animated replay of execution over time
+```
+
 ## Key concepts
 
-**Tasks** have a status (`open`, `in-progress`, `done`, `failed`, `abandoned`, `blocked`) and can block other tasks. Tasks can carry a per-task `model` override and an `agent` identity assignment.
+**Tasks** have a status (`open`, `in-progress`, `done`, `failed`, `abandoned`, `blocked`) and can block other tasks. Tasks can carry a per-task `model` override, an `agent` identity assignment, and a `visibility` field (`internal`, `public`, `peer`) controlling what information is shared during trace exports.
 
 **Agents** are humans or AIs that do work. They can be AI agents (with a role and motivation that shape their behavior) or human agents (with contact info and a human executor like Matrix or email). All agents share the same identity model: capabilities, trust levels, rate, and capacity.
 
@@ -674,6 +736,7 @@ wg list               # all tasks (--status to filter)
 wg show <id>          # full task details
 wg status             # quick one-screen overview
 wg viz                # ASCII dependency graph (--all to include done)
+wg viz --graph        # 2D spatial layout with box-drawing characters
 
 wg why-blocked <id>   # trace the blocker chain
 wg impact <id>        # what depends on this?
@@ -687,6 +750,11 @@ wg aging              # how long tasks have been open
 wg workload           # agent assignment distribution
 wg structure          # entry points, dead ends, high-impact roots
 wg analyze            # comprehensive health report (all of the above)
+
+wg watch              # real-time event stream (for external adapters)
+wg trace show <id>    # execution history of a task
+wg trace export       # export trace data for sharing
+wg trace extract <id> # extract workflow pattern into reusable template
 ```
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command reference including `viz`, `plan`, `coordinate`, `archive`, `reschedule`, and more.
@@ -697,6 +765,7 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command reference includin
 wg log <id> "message"     # add progress notes to a task
 wg artifact <id> path     # record a file produced by a task
 wg viz --mermaid          # generate DOT/mermaid/ASCII graph
+wg viz --graph            # 2D spatial layout with box-drawing characters
 wg archive                # archive completed tasks
 wg check                  # check graph for cycles and issues
 wg trajectory <id>        # optimal task claim order for agents
@@ -731,15 +800,21 @@ auto_assign = false
 name = "My Project"
 ```
 
-Agency data lives in `.workgraph/agency/`:
+Agency data lives in `.workgraph/agency/`, with federation config and trace functions alongside:
 
 ```
-.workgraph/agency/
-  roles/           # Role YAML files (keyed by content-hash)
-  motivations/     # Motivation YAML files
-  agents/          # Agent YAML files (role+motivation pairings)
-  evaluations/     # Evaluation records (JSON)
-  evolver-skills/  # Strategy-specific skill documents for evolution
+.workgraph/
+  graph.jsonl              # Task graph (operations log / trace)
+  config.toml              # Configuration
+  federation.yaml          # Named remotes for agency federation
+  functions/               # Trace functions (workflow templates)
+    <name>.yaml
+  agency/
+    roles/                 # Role YAML files (keyed by content-hash)
+    motivations/           # Motivation YAML files
+    agents/                # Agent YAML files (role+motivation pairings)
+    evaluations/           # Evaluation records (JSON)
+    evolver-skills/        # Strategy-specific skill documents for evolution
 ```
 
 ## More docs

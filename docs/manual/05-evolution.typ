@@ -1,4 +1,4 @@
-= Evolution & Improvement
+= Evolution & Improvement <sec-evolution>
 
 The agency does not merely execute work. It learns from it.
 
@@ -42,6 +42,26 @@ This three-level, cross-referenced propagation creates the data structure that m
 Both done and failed tasks can be evaluated. This is intentional—there is useful signal in failure. Which agents fail on which kinds of tasks reveals mismatches between identity and work that evolution can address.
 
 Human agents are tracked by the same evaluation machinery, but their evaluations are excluded from the evolution signal. The system does not attempt to "improve" humans. Human evaluation data exists for reporting and trend analysis, not for evolutionary pressure.
+
+=== External evaluation sources <external-evaluation>
+
+Not every signal about an agent's performance comes from an LLM reading its output. A trading agent might produce clean, well-structured code that scores 0.91 on internal evaluation—and lose money. A documentation agent might produce prose that the evaluator loves but that users find confusing. Internal quality assessment is necessary but not sufficient. The real test is what happens when the work meets the world.
+
+Every evaluation carries a `source` field that identifies where the score came from. The internal auto-evaluator writes `source: "llm"`. External evaluations use freeform tags that name their origin: `"outcome:sharpe"` for a portfolio's realized Sharpe ratio, `"ci:test-suite"` for a continuous integration result, `"vx:peer-123"` for a score received from a federated peer, `"user:feedback"` for a human's direct assessment. The tag is a string, not an enum—any external system can define its own source convention.
+
+External evaluations enter the system through `wg evaluate record`:
+
+```
+wg evaluate record --task portfolio-q1 \
+  --source "outcome:sharpe" --score 0.72 \
+  --notes "Realized Sharpe below target"
+```
+
+The command requires a task in done or failed status, resolves the agent identity from the task's assignment, and writes the evaluation to the same store as internal evaluations. It propagates to the same three levels—agent, role with context, motivation with context. From the perspective of the performance records, an external evaluation is indistinguishable from an internal one except for the source tag.
+
+This is where the evolutionary signal becomes rich. Consider an agent that scores 0.91 internally (clean code, complete deliverables, good style) but 0.72 on outcome (the code it wrote performed poorly in production). The evolver sees both scores in the performance summary. The gap between internal quality and external outcome is itself a signal—it suggests the role's desired outcome or the motivation's trade-offs need to account for domain-specific success criteria, not just code quality. The evolver can propose a mutation that sharpens the role toward outcomes the internal evaluator cannot see.
+
+The five dimensions of external signal that can flow into a workgraph project—evaluation scores, new tasks, imported context, state changes, and event observations—form the system's interface with its environment. Evaluation is the most direct: it converts external reality into the same currency the evolver already reads.
 
 == Performance Records and Aggregation <performance>
 
@@ -187,6 +207,24 @@ The meta-agents—the assigner that picks which agent gets which task, the evalu
 
 This is what makes the system autopoietic: it does not just produce work, it produces the conditions for better work. It does not just execute, it reflects on execution and restructures itself in response. The identity space of the agency—the set of roles, motivations, and their pairings—is not static. It is a living population subject to selective pressure from the evaluation signal and evolutionary operations from the evolver.
 
+=== Federation: cross-organizational learning <federation-evolution>
+
+The autopoietic loop described above is closed within a single project. Federation opens it.
+
+Agency entities—roles, motivations, agents, and their evaluation histories—can be shared across workgraph projects via `wg agency pull` and `wg agency push`. Named remotes point to other projects' agency stores. When evaluations are transferred, they merge with local performance records: duplicates are identified by task ID and timestamp, and average scores are recalculated from the combined set. Content-hash IDs make this natural—an entity with the same identity-defining content has the same ID in every project, so deduplication is automatic.
+
+What this means for evolution is concrete. A role that has been evaluated across three projects carries a richer performance record than one evaluated in a single project. The evolver sees a broader sample. A role that scores well on code tasks in one project but poorly on documentation tasks in another presents a clearer picture than either project could provide alone. Federation does not change the evolutionary mechanisms—it enriches the data they act on.
+
+The sharing boundary is controlled by task visibility. Every task carries a `visibility` field: `internal` (the default—nothing crosses organizational boundaries), `public` (sanitized for open sharing—task structure without agent output or logs), or `peer` (richer detail for trusted peers—includes evaluations and workflow patterns). Trace exports (`wg trace export --visibility <zone>`) filter according to this field. The result is a structured, shareable view of work product—enough for a peer to learn from without exposing internal operational detail.
+
+=== Trace functions: organizational routines <trace-functions-evolution>
+
+When a workflow pattern proves effective—a plan-implement-validate cycle that consistently produces high evaluation scores—it can be extracted from the trace into a reusable template. `wg trace extract` reads the completed task graph, captures the task structure, dependencies, loop edges, and agent role hints, and writes a parameterized function to `.workgraph/functions/`. `wg trace instantiate` creates a fresh task graph from that template with new inputs.
+
+These trace functions are the system's organizational routines—the term Nelson and Winter (1982) used for the regular, predictable patterns of behavior that serve as an organization's institutional memory. A routine extracted from a successful feature implementation captures not just what tasks to create, but what skills to require, what review loops to include, and what convergence patterns to expect. It is heritable (shareable across projects via the same YAML format), selectable (routines that produce good evaluation scores are retained; others are revised or abandoned), and mutable (a human or an LLM can edit the template to adapt it).
+
+The connection to evolution is direct. Trace functions capture workflow structure. Evolution improves the agents that execute those workflows. Together, they represent two axes of organizational improvement: better processes and better performers. A well-extracted trace function dispatched to well-evolved agents is the system's equivalent of a mature team following a proven playbook.
+
 But the human hand is always on the wheel. Evolution is a manual trigger, not an automatic process. The human decides when to evolve, reviews what the evolver proposes (especially via `--dry-run`), sets budget limits, and must personally approve any self-mutations. The system improves itself, but only with permission.
 
 == Practical Guidance <practical>
@@ -204,3 +242,9 @@ But the human hand is always on the wheel. Evolution is a manual trigger, not an
 *Watch the synergy matrix.* The matrix reveals which role-motivation pairings work well together and which do not. High-synergy pairs should be preserved. Low-synergy pairs are candidates for mutation or retirement. Under-explored combinations are experiments waiting to happen—assign them to tasks and see what the evaluations say.
 
 *Lineage as audit.* When an agent produces unexpectedly good or bad work, trace its lineage. Which evolution run created its role? What performance data informed that mutation? The lineage chain, combined with evolution run reports, makes every identity decision traceable.
+
+*Mix internal and external signals.* Do not evolve on internal evaluations alone if external outcome data is available. Record CI results, production metrics, or user feedback via `wg evaluate record --source <tag>`. The evolver is most effective when it sees both "the code was well-written" and "the code worked in practice"—the gap between the two is where the most useful mutations live.
+
+*Pull before evolving.* If you maintain multiple workgraph projects or collaborate with peers, run `wg agency pull` before `wg evolve`. Federation imports evaluation data from remote stores, giving the evolver a broader performance picture. A role evaluated across three projects is a more reliable signal than one evaluated in one.
+
+*Extract routines from success.* When a workflow pattern produces consistently high scores, extract it with `wg trace extract`. The resulting trace function preserves the structure that worked. Combine this with evolution: evolve the agents, keep the proven process.

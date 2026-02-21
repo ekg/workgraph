@@ -1,4 +1,4 @@
-= Coordination & Execution <section-coordination>
+= Coordination & Execution <sec-coordination>
 
 When you type `wg service start --max-agents 5`, a background process wakes up, binds a Unix socket, and begins to breathe. Every few seconds it opens the graph file, scans for ready tasks, and decides what to do. This is the coordinator—the scheduling brain that turns a static directed graph into a running system. Without it, workgraph is a notebook. With it, workgraph is a machine.
 
@@ -63,6 +63,8 @@ For each ready task, the coordinator proceeds as follows:
 *Build context from dependencies.* The coordinator reads each terminal dependency's artifacts (file paths recorded by the previous agent) and recent log entries. This context is injected into the prompt so the new agent knows what upstream work produced and what decisions were made. The agent does not start from a blank slate—it inherits the trail of work that came before it.
 
 *Render the prompt.* The executor's prompt template is filled with template variables: `{{task_id}}`, `{{task_title}}`, `{{task_description}}`, `{{task_context}}`, `{{task_identity}}`. The identity block—the agent's role, motivation, skills, and operational parameters—comes from resolving the assigned agent's role and motivation from agency storage. Skills are resolved at this point: file skills read from disk, URL skills fetch via HTTP, inline skills expand in place. The rendered prompt is written to a file in the agent's output directory.
+
+For tasks that sit at the source of loop edges, the rendered prompt carries a note about the `--converged` flag. This informs the agent that it can signal `wg done <task-id> --converged` to break the loop early—preventing the loop edge from firing even if iterations remain and guard conditions are met. The task receives a `"converged"` tag, and the loop evaluator checks for this tag before re-activating the upstream target. This mechanism exists because loops that run to `max_iterations` when the work has already stabilized waste compute and agent time. Convergence is the agent's way of saying "the work is stable, no more iterations needed." A subsequent `wg retry` clears the convergence tag, allowing the loop to resume.
 
 *Generate the wrapper script.* The coordinator writes a `run.sh` that:
 - Unsets `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` environment variables so the spawned agent starts a clean session.
@@ -155,6 +157,8 @@ Two exclusions apply. Tasks assigned to human agents are not auto-evaluated—th
 
 Failed tasks also get evaluated. When a task's status is failed, the coordinator removes the blocker from the evaluation task so it becomes ready immediately. This is deliberate: failure modes carry signal. An agent that fails consistently on certain kinds of tasks reveals information about its role-motivation pairing that the evolution system can act on.
 
+Evaluations created by auto-evaluate carry a `source` field set to `"llm"`, identifying them as internal assessments from the LLM evaluator. External evaluations can be recorded via `wg evaluate record --task <id> --source <tag> --score <0.0-1.0>`, where the source tag is a freeform string—`"outcome:sharpe"`, `"ci:test-suite"`, `"vx:peer-123"`, or any label meaningful to the project. The evolver reads all evaluations regardless of source (see §5), #label("forward-ref-eval-source") enabling it to weigh internal quality assessments against external outcome data when proposing improvements to the agency.
+
 == Dead Agent Detection and Triage <dead-agents>
 
 Every tick, the coordinator checks whether each agent's process is still alive. A dead agent—one whose PID no longer exists—triggers cleanup: the agent's task is unclaimed (status reverts to open), and the agent is marked dead in the registry.
@@ -194,6 +198,41 @@ The full set of IPC commands:
 )
 
 The `reconfigure` command is particularly useful for live tuning. If a fan-out creates twenty parallel tasks and you only have five slots, you can bump `max_agents` to ten without stopping anything. When the fan-out completes and work converges, scale back down.
+
+== Observing the System <observing>
+
+The IPC protocol lets tools talk to the daemon. But many integrations need to observe the graph from the outside—a CI system that triggers on task completion, a dashboard that tracks agent progress, a portfolio manager that records outcomes. For these, workgraph provides `wg watch`.
+
+`wg watch` streams a real-time event feed of graph mutations to standard output. Each line is a JSON object with a type, timestamp, optional task ID, and a data payload carrying the operation detail. The event types mirror the operations log: `task.created`, `task.started`, `task.completed`, `task.failed`, `task.retried`, `evaluation.recorded`, `agent.spawned`, `agent.completed`. The stream reads from the same provenance log that records every mutation to the graph—`wg watch` is not a separate event system but a live tail of the log with structured formatting.
+
+Events can be filtered. The `--event` flag accepts categories—`task_state` for all task transitions, `evaluation` for scoring events, `agent` for spawn and completion. The `--task` flag narrows to events affecting a specific task by ID prefix. These filters compose: you can watch only state-change events for tasks in a particular subtree. The `--replay N` flag emits the last N historical operations before switching to live streaming, letting a newly launched adapter catch up on recent history without scanning the full log.
+
+=== The Adapter Pattern <adapter-pattern>
+
+`wg watch` is one side of a broader integration architecture. External systems interact with workgraph through five ingestion points, each corresponding to a different kind of information flow:
+
+#table(
+  columns: (auto, auto, 1fr),
+  align: (left, left, left),
+  table.header([*Point*], [*Command*], [*What flows*]),
+  [Evaluation], [`wg evaluate record`], [Scores with source tags — external outcome data enters the agency's performance records.],
+  [Task], [`wg add`], [New work items — an external system can inject tasks with dependencies, skills, and descriptions.],
+  [Context], [`wg trace import`], [Peer exports and knowledge artifacts — enriching agent prompts with cross-boundary data.],
+  [State], [`wg done`, `wg fail`, `wg log`], [Status changes and progress events — an external system can mark work complete or record observations.],
+  [Observation], [`wg watch`], [The event stream _out_ — external systems observe what is happening without polling.],
+) <fig-ingestion-points>
+
+The generic adapter follows a four-step pattern: _observe_ the graph via `wg watch`, _translate_ external data into workgraph's vocabulary, _ingest_ via the appropriate CLI command, and _react_ by triggering external actions. A CI adapter might observe `task.completed` events, run a test suite, and record the result via `wg evaluate record --source "ci:tests"`. A portfolio manager might observe agent completions, measure real-world outcomes, and feed scores back as external evaluations. The adapter pattern is deliberately simple—each integration is a small loop of observe, translate, ingest, react—because the ingestion points are stable CLI commands, not a bespoke API.
+
+=== The Operations Log and Trace <operations-log>
+
+Every mutation to the graph—task creation, status change, evaluation, agent spawn—is recorded in the operations log (`operations.jsonl`). This log is the raw material for both `wg watch` (live streaming) and `wg trace` (historical reconstruction). The coordinator does not maintain a separate event bus; `wg watch` simply tails the operations log and formats each entry as a typed JSON event.
+
+The trace system builds on this foundation. `wg trace show` reconstructs the history of a task or subtree by reading the operations log and replaying state transitions. `wg trace show --animate` takes this further: it reconstructs temporal snapshots of the graph at each mutation, then plays them back in the terminal as an interactive animation—tasks transitioning between statuses over time, a visual record of how work flowed through the graph. You can pause, step forward and backward through snapshots, and adjust playback speed.
+
+`wg trace export --visibility <zone>` produces a filtered, shareable snapshot of the trace. The visibility parameter controls what crosses organizational boundaries: `internal` exports everything, `public` sanitizes the export (task structure without agent output, logs, or evaluations), and `peer` provides richer detail for trusted peers (including evaluations with notes stripped). The corresponding `wg trace import` ingests a peer's export, namespacing imported tasks to avoid ID collisions and tagging evaluations with their origin for provenance tracking. These exports use the `visibility` field on each task (see §2) #label("back-ref-visibility") to determine what is included at each zone level.
+
+These capabilities—watch, trace, export, import—form a layered system. The operations log is the ground truth. The watch stream is its real-time face. The trace commands are its analytical tools. And the export/import mechanism is how organizational memory crosses boundaries.
 
 == Custom Executors <executors>
 

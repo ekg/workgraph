@@ -1,6 +1,6 @@
 #set heading(numbering: "1.")
 
-= The Agency Model
+= The Agency Model <sec-agency>
 
 A generic AI assistant is a blank slate. It has no declared priorities, no persistent
 personality, no way to accumulate craft. Every session starts from zero. The agency
@@ -297,7 +297,7 @@ exist unchanged. New agents can be created pairing the refined role with existin
 motivations. The old and new coexist, each with their own performance records, until
 the evidence shows which is superior.
 
-== Lineage and Deduplication <lineage>
+== Lineage and Deduplication <agency-lineage>
 
 Content-hash IDs enable two properties that matter at scale: lineage tracking and
 deduplication.
@@ -321,6 +321,65 @@ redundant entities. It also means that convergent evolution is recognized: if tw
 independent mutation paths arrive at the same role definition, the system knows they are
 the same role.
 
+== Federation: Sharing Across Projects <federation>
+
+An agency built in one project is not confined to that project. The federation system
+lets you share roles, motivations, and agents across workgraph projects---transferring
+proven identities from one context into another, complete with their performance
+histories and lineage chains.
+
+Federation operates through named _remotes_: references to another project's agency
+store, managed via `wg agency remote add`, `wg agency remote list`, and
+`wg agency remote remove`. Remotes are stored in `.workgraph/federation.yaml`. Once a
+remote is configured, three operations become available.
+
+*Scanning.* `wg agency scan <remote>` lists the roles, motivations, and agents in a
+remote store without modifying anything. This is reconnaissance---you see what exists
+before deciding what to import.
+
+*Pulling.* `wg agency pull <remote>` copies entities from the remote store into the
+local project. Roles, motivations, agents, and their evaluation records are all
+transferred. You can filter by entity type (`--roles-only`, `--motivations-only`) or
+by specific entity IDs. A `--dry-run` flag previews the operation without writing.
+
+*Pushing.* `wg agency push <remote>` is the symmetric operation---it copies local
+entities to the remote store. The same filtering and dry-run options apply.
+
+Content-hash IDs make federation natural. Because identity is determined by content,
+the same role has the same ID in every project. When you pull a role that already
+exists locally, the system recognizes the collision and skips the duplicate. There is
+no mapping table, no namespace negotiation, no manual reconciliation. Identity
+deduplication is a mathematical consequence of content-hashing.
+
+The interesting question is what happens to _metadata_---the mutable fields that sit
+outside the content-hash. Performance records are merged: evaluation references from
+both stores are unioned, deduplicated by the `(task_id, timestamp)` tuple, and average
+scores are recalculated from the merged set. This means pulling from a remote enriches
+the local performance picture---you gain evaluation data from contexts you have never
+seen. Lineage is preserved by preferring the richer ancestry: if the remote's lineage
+records more parents or a higher generation, it takes precedence. Names default to
+keeping the local value, though a `--force` flag overrides this.
+
+Referential integrity is enforced during transfer. When you pull an agent, its
+referenced role and motivation are automatically included---you cannot end up with an
+agent pointing to a role that does not exist. If a dependency is missing from the
+source store, the operation fails with a clear error rather than creating a broken
+reference.
+
+Federation preserves lineage across project boundaries. An entity pulled from a remote
+carries its full ancestry chain. You can trace it back through mutations and crossovers
+to its manually created roots, even when those roots were created in a different
+project by a different team. The immutable nature of content-hash IDs guarantees that
+each link in the chain refers to the exact content that existed at creation time, no
+matter where it was created.
+
+The practical effect is that organizations can maintain a shared pool of proven agent
+identities. A team that has evolved an effective "Reviewer" role over dozens of
+evaluations can push it to a shared remote. Other teams pull it, pair it with their own
+motivations, and immediately benefit from that evolutionary history. The performance
+data travels with the entity, so the receiving team can see _why_ the role is considered
+effective before deciding to adopt it.
+
 == Cross-References
 
 The agency model described here is the _identity layer_ of the system. How these
@@ -328,3 +387,13 @@ identities are dispatched to tasks---the claim-before-spawn protocol, the wrappe
 script, the coordinator's tick loop---is detailed in #emph[Section 4]. How agents are
 evaluated after completing work, and how evaluation data feeds back into evolution, is
 detailed in #emph[Section 5].
+
+One detail bridges the agency model and the evaluation system: every evaluation carries
+a `source` field that identifies where the score came from. Internal auto-evaluations
+have source `"llm"`. External signals use structured tags---`"outcome:sharpe"` for
+market data, `"ci:test-suite"` for CI results, `"vx:peer-id"` for peer assessments.
+The source field is a freeform string, not a closed enum, so any signal source can
+participate. This matters for the agency model because an agent's performance record
+aggregates evaluations from _all_ sources. The evolver sees the full picture: internal
+quality assessments alongside external outcome data. The interplay between diverse
+evaluation sources and the evolutionary process is detailed in #emph[Section 5].

@@ -55,6 +55,17 @@ Every writer must use these terms with these exact meanings. If a term is not in
 | **map/reduce pattern** | An emergent workflow pattern in the task graph. *Fan-out* (map): one task blocks several children that run in parallel. *Fan-in* (reduce): several tasks block a single aggregator that runs only when all are terminal. Not a formal primitive — arises naturally from dependency edges. |
 | **triage** | An optional LLM-based assessment of dead agents. When `auto_triage` is enabled, the coordinator reads the dead agent's output log and classifies the result as *done*, *continue* (with recovery context), or *restart*. |
 | **wrapper script** | The `run.sh` file generated for each spawned agent. Runs the executor command, captures output, and handles post-exit logic: if the agent didn't self-report completion, the wrapper checks task status and calls `wg done` or `wg fail` accordingly. |
+| **visibility** | A field on each task controlling what information crosses organizational boundaries during trace exports. Three values: *internal* (default, org-only — all details included), *public* (sanitized sharing — task structure without agent output or logs), *peer* (richer detail for credentialed peers — includes evaluations and agent info but strips notes and detailed logs). Set via `wg add --visibility <zone>` or `wg edit`. |
+| **convergence** | An agent-driven signal (`wg done --converged`) indicating that a loop's iterative work has reached a stable state. Adds a `"converged"` tag to the task. When the source task carries the converged tag, loop edges do not fire — even if iterations remain and guard conditions are met. Cleared on retry. |
+| **trace** | The operations log (`operations.jsonl`) recording every mutation to the graph. The project's organizational memory — queryable via `wg trace`, exportable with visibility filtering via `wg trace export`, and importable from peers via `wg trace import`. Also the high-level concept referring to the provenance system and `wg trace` command family. |
+| **trace export** | A filtered, shareable snapshot of the trace. Visibility filtering controls what is included: *internal* exports everything, *public* sanitizes (strips logs, evaluations, agent details), *peer* provides richer detail for trusted peers. The interchange format for cross-boundary sharing. Produced by `wg trace export --visibility <zone>`. |
+| **trace function** | A parameterized workflow template extracted from completed traces via `wg trace extract`. Captures task structure, dependencies, loop edges, and input parameters. Input types include string, text, file list, file content, number, URL, enum, and JSON. Instantiated via `wg trace instantiate` to create new task graphs following the same pattern. Stored as YAML in `.workgraph/functions/`. |
+| **replay** | Re-execution of previously completed or failed work. `wg replay` creates an immutable snapshot of the current graph state (stored in `.workgraph/runs/`), then selectively resets tasks based on criteria: failed-only, below-score threshold, explicit task list, or subgraph. Dependents in the transitive closure are also reset. Supports `--plan-only` for previewing. |
+| **federation** | The system for sharing agency entities across workgraph projects. Operations: *scan* (discover entities in a remote store), *pull* (import from remote to local), *push* (export from local to remote). Named remotes are stored in `.workgraph/federation.yaml`. Performance records are merged during transfer with deduplication by task ID and timestamp. Content-hash IDs make federation natural — identical entities deduplicate automatically. |
+| **remote** | A named reference to another workgraph project's agency store, used for federation. Stores a path, optional description, and last-sync timestamp. Managed via `wg agency remote add/list/remove`. Stored in `.workgraph/federation.yaml`. |
+| **evaluation source** | A freeform string tag on each evaluation identifying its origin. Default: `"llm"` (internal auto-evaluator). Conventions: `"manual"` (human-reviewed), `"outcome:<metric>"` (external outcome data, e.g., `"outcome:sharpe"`), `"ci:<suite>"` (CI/test results), `"vx:<peer-id>"` (Veracity Exchange peer evaluation), `"import:<source>"` (imported via trace import). The evolver reads all evaluations regardless of source. |
+| **event stream** | A real-time feed of graph mutations produced by `wg watch --json`. Events are typed: `task.created`, `task.started`, `task.completed`, `task.failed`, `task.retried`, `evaluation.recorded`, `agent.spawned`, `agent.completed`. Filterable by category (`task_state`, `evaluation`, `agent`) or by task ID prefix. Enables external adapters to observe and react without polling. |
+| **adapter** | An external tool or service that translates between an external system's vocabulary and workgraph's ingestion points. The generic pattern: observe (via `wg watch`) → translate → ingest (via `wg` CLI commands) → react. Not a formal type in the codebase — a conceptual pattern for integration. Examples: CI bots, Slack integrations, portfolio management tools. |
 
 ---
 
@@ -79,7 +90,15 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 6. **Storage and simplicity.** Everything is files: JSONL for the graph, YAML for agency entities, TOML for configuration. No database, no server dependency. The service daemon is optional — you can run workgraph purely from the CLI.
 
-**Cross-references:** Forward-references to Section 2 (task graph), Section 3 (agency model), Section 4 (coordination).
+7. **Trace and organizational memory.** The operations log records every mutation to the graph. This trace is the project's memory — queryable via `wg trace`, exportable for sharing, and extractable into reusable workflow templates (trace functions). Mention briefly; detailed treatment in §2 (trace functions) and §4 (event stream).
+
+8. **External integration.** External systems can observe workgraph via the event stream (`wg watch --json`), translate events, and inject information through five ingestion points: evaluations, tasks, context (trace import), state changes, and observations. This adapter pattern enables CI bots, portfolio tools, and peer collaboration without tight coupling. Mention briefly; detailed treatment in §4.
+
+9. **Task visibility.** Tasks carry a visibility field (`internal`, `public`, or `peer`) that controls what information crosses organizational boundaries during trace exports. This is the boundary mechanism for sharing — relevant to both the task graph (§2) and federation (§3).
+
+10. **Federation.** Agency entities can be shared across projects via federation — pulling proven roles and motivations from one project into another. Content-hash IDs make deduplication automatic. Mention briefly; detailed treatment in §3 and §5.
+
+**Cross-references:** Forward-references to Section 2 (task graph, trace functions), Section 3 (agency model, federation), Section 4 (coordination, event stream), Section 5 (external evaluation sources).
 
 **Tone notes:** This section should feel like an invitation. Brief, confident, no hedging. Establish the *why* before the *how*.
 
@@ -92,7 +111,7 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 **Key points to cover:**
 
-1. **Tasks as nodes.** The anatomy of a task: ID (auto-generated slug from title), title, description, status, estimates, tags, skills, inputs, deliverables, artifacts. Explain what each field is *for* — not just what it contains. Emphasize that tasks are the atoms of work; everything else is structure around them.
+1. **Tasks as nodes.** The anatomy of a task: ID (auto-generated slug from title), title, description, status, estimates, tags, skills, inputs, deliverables, artifacts, and visibility. Explain what each field is *for* — not just what it contains. Include the `visibility` field (`internal`/`public`/`peer`) in the field table — it controls what crosses organizational boundaries during trace exports. Emphasize that tasks are the atoms of work; everything else is structure around them.
 
 2. **Status and lifecycle.** The six statuses and their transitions. Open → InProgress → Done is the happy path. Failed → retry → Open is the recovery path. Abandoned is the escape hatch. Blocked is rarely used explicitly because blocking is derived from dependencies. Draw the state machine clearly.
 
@@ -104,15 +123,19 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 6. **Loop edges: intentional cycles.** Why workgraph is a directed graph, not a DAG. The `loops_to` mechanism: a separate edge type that fires on task completion, re-opens a target upstream, increments the iteration counter, and is bounded by `max_iterations`. Loop edges are *not* blocking edges — they don't affect scheduling. Guards (Always, TaskStatus, IterationLessThan) control when loops fire. Delays (`ready_after`) control pacing. Walk through the review-revise-loop example step by step.
 
-7. **Intermediate task re-opening.** When a loop fires and re-opens its target, intermediate tasks between source and target that were Done are also re-opened. The source task itself is re-opened. This makes the entire cycle available for re-execution.
+7. **Early convergence.** An agent can signal `wg done <task> --converged` to prevent loop edges from firing, even if iterations remain and guards are satisfied. The task gets a `"converged"` tag. The loop evaluator checks this tag and skips firing. Use case: a refine agent determines work has converged and doesn't need another iteration. `wg retry` clears the convergence tag. This complements bounded iteration — `max_iterations` is the safety cap, convergence is the intelligent early exit.
 
-8. **Emergent patterns.** Fan-out (map): one parent blocks several children. Fan-in (reduce): several tasks block one aggregator. Pipelines: linear chains. Review loops: cycles via loop edges. These are not built-in primitives — they arise naturally from the dependency graph.
+8. **Intermediate task re-opening.** When a loop fires and re-opens its target, intermediate tasks between source and target that were Done are also re-opened. The source task itself is re-opened. This makes the entire cycle available for re-execution.
 
-9. **Graph analysis tools.** Critical path (longest dependency chain), bottlenecks (tasks blocking the most downstream work), impact (what depends on a task), cost (total including dependencies), forecast (projected completion). Brief mentions — these are tools, not concepts.
+9. **Emergent patterns.** Fan-out (map): one parent blocks several children. Fan-in (reduce): several tasks block one aggregator. Pipelines: linear chains. Review loops: cycles via loop edges. These are not built-in primitives — they arise naturally from the dependency graph. Mention that proven patterns can be captured as reusable trace functions (see below).
 
-10. **Storage format.** JSONL: one JSON node per line, human-readable, version-control-friendly. Atomic writes with file locking for concurrent safety. The graph file is the canonical state — everything reads from and writes to it.
+10. **Trace functions: reusable workflow templates.** When a workflow pattern proves useful, it can be extracted from a completed trace into a reusable template — a trace function. Trace functions capture the task structure, dependencies, and loop edges of a proven workflow. They are parameterized (feature name, description, files become input variables with typed schemas) and can be instantiated to create new task graphs following the same pattern. See `wg trace extract` and `wg trace instantiate`. Stored in `.workgraph/functions/`. Connect back to emergent patterns — trace functions formalize what starts as ad-hoc structure.
 
-**Cross-references:** Back-reference to Section 1 (overview). Forward-reference to Section 4 (how the coordinator uses readiness). Forward-reference to Section 5 (loop edges as evaluation points).
+11. **Graph analysis and visualization tools.** Critical path (longest dependency chain), bottlenecks (tasks blocking the most downstream work), impact (what depends on a task), cost (total including dependencies), forecast (projected completion). Include `wg viz --graph` which produces a 2D spatial layout using Unicode box-drawing characters, showing tasks positioned by dependency depth. Brief mentions — these are tools, not concepts.
+
+12. **Storage format.** JSONL: one JSON node per line, human-readable, version-control-friendly. Atomic writes with file locking for concurrent safety. The graph file is the canonical state — everything reads from and writes to it.
+
+**Cross-references:** Back-reference to Section 1 (overview). Forward-reference to Section 3 (federation uses visibility for cross-boundary sharing). Forward-reference to Section 4 (how the coordinator uses readiness; convergence in dispatch prompts; event stream). Forward-reference to Section 5 (loop edges as evaluation points; trace functions connect to replay).
 
 **Tone notes:** This section is the most technical. Be precise but not pedantic. Use the review-revise-loop as a running example to make the abstract concrete.
 
@@ -145,9 +168,13 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 10. **Task-agent matching.** `wg match` compares a task's required skills against agents' capabilities. Scores by match count + trust bonus. This is used by the auto-assign system and can be used manually.
 
-**Cross-references:** Back-reference to Section 1 (agency overview). Forward-reference to Section 4 (how agents are dispatched). Forward-reference to Section 5 (how agents are evaluated and evolved).
+11. **Federation: sharing across projects.** Agency entities can be shared between workgraph projects via federation. `wg agency scan <remote>` discovers entities in another project's agency store. `wg agency pull <remote>` imports entities (roles, motivations, agents, and their evaluations) from a remote store. `wg agency push <remote>` exports local entities to a remote store. Named remotes are stored in `.workgraph/federation.yaml` and managed via `wg agency remote add/list/remove`. Performance records are merged during transfer: evaluations are deduplicated by task ID + timestamp, and average scores are recalculated. Content-hash IDs make federation natural — the same entity has the same ID everywhere, so deduplication is automatic. Lineage is preserved across federation — ancestry chains remain intact. Mention that task visibility (§2) controls what trace data crosses boundaries, while federation controls what agency data crosses boundaries.
 
-**Tone notes:** Emphasize the design philosophy — why content-hashing, why immutability, why the role/motivation split. These are choices, not accidents.
+12. **Evaluation source and external signals.** Evaluations carry a `source` field that distinguishes internal assessments (`"llm"`) from external signals (`"outcome:sharpe"`, `"ci:test-suite"`, `"vx:peer-id"`). This is architecturally significant — it connects the agency model to external systems that produce outcome data. Brief mention here with forward reference to §5 for full treatment of how the evolver weighs different sources.
+
+**Cross-references:** Back-reference to Section 1 (agency overview). Back-reference to Section 2 (task visibility as the task-level boundary mechanism). Forward-reference to Section 4 (how agents are dispatched). Forward-reference to Section 5 (how agents are evaluated and evolved; federation as data source for evolution; evaluation source weighting).
+
+**Tone notes:** Emphasize the design philosophy — why content-hashing, why immutability, why the role/motivation split. These are choices, not accidents. Federation should feel like a natural extension of content-hashing — if identity is a mathematical fact, sharing it is trivial.
 
 ---
 
@@ -162,7 +189,7 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 2. **The coordinator tick.** The six-phase heartbeat: (1) reap zombie processes, (2) clean up dead agents and count alive slots, (3) create auto-assign meta-tasks if enabled, (4) create auto-evaluate meta-tasks if enabled, (5) save graph if modified and find ready tasks, (6) spawn agents for ready tasks up to available slots. Two triggers: IPC-driven (immediate, reactive) and safety-net poll (background timer, catches manual edits).
 
-3. **The dispatch cycle in detail.** For each ready task: resolve executor (shell for `exec` tasks, agent's executor otherwise, fallback to config default) → resolve model (task.model > coordinator.model > agent.model) → build context from completed dependencies (their artifacts + recent logs) → render prompt template with identity and skills → generate wrapper script → claim task atomically → fork detached process → register in agent registry. Emphasize the claim-before-spawn ordering that prevents double-dispatch.
+3. **The dispatch cycle in detail.** For each ready task: resolve executor (shell for `exec` tasks, agent's executor otherwise, fallback to config default) → resolve model (task.model > coordinator.model > agent.model) → build context from completed dependencies (their artifacts + recent logs) → render prompt template with identity and skills → generate wrapper script → claim task atomically → fork detached process → register in agent registry. Emphasize the claim-before-spawn ordering that prevents double-dispatch. Mention that for tasks that are the source of loop edges, the rendered prompt includes a note about the `--converged` flag, informing the agent that it can break the loop early if the work has reached a stable state.
 
 4. **The wrapper script.** What `run.sh` does: unsets environment variables for nested sessions, runs the executor command with output capture, checks task status after exit (the agent may have already self-reported), and marks done or failed if the agent didn't. This is the safety net that ensures tasks don't get stuck in-progress after agent death.
 
@@ -170,7 +197,7 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 6. **Auto-assign.** When enabled, the coordinator creates blocking `assign-{task-id}` meta-tasks for unassigned ready work. An assigner agent (configurable model and identity) evaluates available agents and picks the best fit. Meta-tasks are tagged to prevent recursive auto-assignment.
 
-7. **Auto-evaluate.** When enabled, the coordinator creates `evaluate-{task-id}` meta-tasks blocked by each work task. When the work task completes (or fails), the evaluation task becomes ready. Evaluation tasks use the shell executor to run `wg evaluate`. Human-agent tasks are skipped. Meta-tasks are tagged to prevent recursive evaluation.
+7. **Auto-evaluate.** When enabled, the coordinator creates `evaluate-{task-id}` meta-tasks blocked by each work task. When the work task completes (or fails), the evaluation task becomes ready. Evaluation tasks use the shell executor to run `wg evaluate`. Human-agent tasks are skipped. Meta-tasks are tagged to prevent recursive evaluation. Evaluations created by auto-evaluate carry `source: "llm"`. External evaluations can be recorded via `wg evaluate record --source <tag>`, allowing the evolver to consider both internal quality assessments and external outcome data (see §5).
 
 8. **Dead agent detection and triage.** Every tick checks PIDs. Dead agents have their tasks unclaimed. With `auto_triage` enabled, an LLM reads the agent's output log and classifies the result: *done* (task was actually completed), *continue* (partial progress, inject recovery context), or *restart* (no meaningful progress). Max-retries is respected.
 
@@ -180,7 +207,11 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 11. **Pause, resume, and manual control.** The coordinator can be paused (no new spawns, running agents continue) and resumed. `wg service tick` runs a single coordinator tick for debugging. `wg spawn` dispatches a single task manually without the daemon.
 
-**Cross-references:** Back-reference to Section 2 (readiness). Back-reference to Section 3 (agent identity injection). Forward-reference to Section 5 (evaluation feeding evolution).
+12. **Observing the system: `wg watch` (event stream).** `wg watch --json` streams a real-time event feed of graph mutations. Events are typed: `task.created`, `task.started`, `task.completed`, `task.failed`, `task.retried`, `evaluation.recorded`, `agent.spawned`, `agent.completed`. Events can be filtered by category (`--filter task_state`) or by task ID prefix. The event stream reads from the same operations log that records all graph mutations. This enables the adapter pattern: a CI integration, a Slack bot, or a portfolio management tool can observe workgraph events and react without polling. Describe the generic adapter cycle: observe → translate → ingest → react. Connect back to the five ingestion points mentioned in §1.
+
+13. **Replay.** `wg replay` re-executes previously completed or failed work by creating an immutable snapshot of the current graph state and selectively resetting tasks. Criteria for reset: `--failed-only`, `--below-score <threshold>`, explicit task list, or `--subgraph <root>`. Dependents in the transitive closure are also reset. `--plan-only` previews what would be reset. Snapshots are stored in `.workgraph/runs/`. Connect to trace functions (§2) — replay re-executes existing work, trace functions template new work from proven patterns.
+
+**Cross-references:** Back-reference to Section 2 (readiness; convergence and loop edges). Back-reference to Section 3 (agent identity injection; federation). Forward-reference to Section 5 (evaluation feeding evolution; evaluation source). Forward-reference to Section 1 (event stream enables external integration pattern).
 
 **Tone notes:** This is operational prose. Walk through the dispatch cycle as a narrative, not a bullet list. Make the reader *see* what happens when `wg service start` runs and a task becomes ready.
 
@@ -195,7 +226,7 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 1. **The agency as a living system.** The full loop: assign → execute → evaluate → evolve → assign (improved). Each step feeds the next. The system is designed to learn from its own performance data and produce better agent identities over time. This is not magic — it is a structured feedback loop with human oversight at the evolution step.
 
-2. **Evaluation in depth.** What the evaluator sees: task definition, agent identity, artifacts, log entries, timing. What it scores: correctness (40%), completeness (30%), efficiency (15%), style adherence (15%). How scores are computed: weighted average to a single 0.0–1.0 score. How scores propagate: to the agent, the role (with motivation as context), and the motivation (with role as context). This three-level propagation creates the data needed for synergy analysis.
+2. **Evaluation in depth.** What the evaluator sees: task definition, agent identity, artifacts, log entries, timing. What it scores: correctness (40%), completeness (30%), efficiency (15%), style adherence (15%). How scores are computed: weighted average to a single 0.0–1.0 score. How scores propagate: to the agent, the role (with motivation as context), and the motivation (with role as context). This three-level propagation creates the data needed for synergy analysis. Every evaluation carries a `source` field (see below).
 
 3. **The performance record.** Each entity maintains: task count, average score, and a list of evaluation references. The `context_id` on each evaluation reference enables cross-cutting analysis: "how does this role perform with different motivations?" and vice versa.
 
@@ -213,9 +244,13 @@ Every writer must use these terms with these exact meanings. If a term is not in
 
 10. **The autopoietic dimension.** The meta-agents (assigner, evaluator, evolver) are themselves agency entities with roles and motivations. They can be evaluated and evolved. The evolver can propose changes to the assigner or evaluator. Self-mutations of the evolver itself require human approval. This creates a system that can improve not just its workers but its coordination mechanisms — subject to human oversight at every evolution step. Evolution is intentionally kept as a manual trigger (`wg evolve`), not automated, because the human decides when there is enough evaluation data to act on.
 
-11. **Practical guidance.** When to evolve: after accumulating enough evaluations (at least 5-10 per role). How to use `--budget`: start small (2-3 operations), review results, iterate. How to use `--dry-run`: always preview first. How to seed: `wg agency init` for starters, then evolve. How to experiment: use the under-explored combinations from `wg agency stats` as hypotheses.
+11. **External evaluation sources.** Every evaluation carries a `source` field. Internal auto-evaluations have `source: "llm"`. External evaluations can be recorded via `wg evaluate record --task <id> --source <tag> --score <0.0-1.0>`. Source tags are freeform strings: `"outcome:sharpe"`, `"ci:test-suite"`, `"user:feedback"`, `"vx:peer-123"`. The evolver reads all evaluations regardless of source — it sees both "the LLM evaluator thought the code was good" and "the market said the portfolio was mediocre." This enables richer evolution signals: internal quality + external outcomes. Walk through an example: an agent scores 0.91 on internal evaluation (clean code) but 0.72 on outcome evaluation (poor market performance). The evolver sees the gap and proposes a domain-specific improvement.
 
-**Cross-references:** Back-reference to Section 3 (roles, motivations, content-hash IDs). Back-reference to Section 4 (auto-evaluate, auto-assign creating the data pipeline). Back-reference to Section 2 (loop edges as natural evaluation points for iterative tasks).
+12. **Federation as a data source for evolution.** Agency federation (`wg agency pull`) can import evaluation data from other projects. When evaluations are transferred, they merge with local performance records — deduplicating by task ID and timestamp, recalculating averages. This means the evolver can consider performance data from the broader organizational context, not just the current project. Connect to §3 for federation mechanics.
+
+13. **Practical guidance.** When to evolve: after accumulating enough evaluations (at least 5-10 per role). How to use `--budget`: start small (2-3 operations), review results, iterate. How to use `--dry-run`: always preview first. How to seed: `wg agency init` for starters, then evolve. How to experiment: use the under-explored combinations from `wg agency stats` as hypotheses.
+
+**Cross-references:** Back-reference to Section 3 (roles, motivations, content-hash IDs; federation mechanics). Back-reference to Section 4 (auto-evaluate, auto-assign creating the data pipeline; evaluation source in auto-evaluate; event stream enabling external evaluations). Back-reference to Section 2 (loop edges as natural evaluation points for iterative tasks).
 
 **Tone notes:** This section should feel like watching a system learn. The prose should build from the concrete (one evaluation) to the systemic (the full improvement cycle). End with the philosophical point: this is a system that can describe and improve itself, but always with a human hand on the wheel.
 
@@ -228,15 +263,19 @@ Every writer must use these terms with these exact meanings. If a term is not in
 | 01-overview | 02-task-graph | "The graph model is detailed in §2" |
 | 01-overview | 03-agency | "The agency system is detailed in §3" |
 | 01-overview | 04-coordination | "Coordination and dispatch are detailed in §4" |
-| 02-task-graph | 04-coordination | "How the coordinator uses readiness — §4" |
-| 02-task-graph | 05-evolution | "Loop edges as natural evaluation points — §5" |
+| 01-overview | 05-evolution | "External evaluation sources are detailed in §5" |
+| 02-task-graph | 03-agency | "Task visibility controls what federation shares — §3" |
+| 02-task-graph | 04-coordination | "How the coordinator uses readiness — §4; convergence in dispatch prompts — §4" |
+| 02-task-graph | 05-evolution | "Loop edges as natural evaluation points — §5; trace functions connect to replay — §4" |
 | 03-agency | 04-coordination | "How agents are dispatched — §4" |
-| 03-agency | 05-evolution | "How agents are evaluated and evolved — §5" |
-| 04-coordination | 02-task-graph | "Readiness calculation — §2" |
-| 04-coordination | 03-agency | "Agent identity injection — §3" |
-| 04-coordination | 05-evolution | "Auto-evaluate creates the data pipeline for §5" |
-| 05-evolution | 03-agency | "Roles, motivations, content-hash IDs — §3" |
-| 05-evolution | 04-coordination | "Auto-evaluate and auto-assign — §4" |
+| 03-agency | 05-evolution | "How agents are evaluated and evolved — §5; federation data enriches evolution — §5" |
+| 03-agency | 02-task-graph | "Task visibility as the task-level boundary mechanism — §2" |
+| 04-coordination | 01-overview | "Event stream enables external integration pattern — §1" |
+| 04-coordination | 02-task-graph | "Readiness calculation — §2; convergence and loop edges — §2" |
+| 04-coordination | 03-agency | "Agent identity injection — §3; federation — §3" |
+| 04-coordination | 05-evolution | "Auto-evaluate creates the data pipeline for §5; evaluation source — §5" |
+| 05-evolution | 03-agency | "Roles, motivations, content-hash IDs — §3; federation mechanics — §3" |
+| 05-evolution | 04-coordination | "Auto-evaluate and auto-assign — §4; event stream enabling external evaluations — §4" |
 | 05-evolution | 02-task-graph | "Loop edges as evaluation points — §2" |
 
 ---
