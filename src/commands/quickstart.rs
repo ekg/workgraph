@@ -72,7 +72,8 @@ DISCOVERING & ADDING WORK
 
 TASK STATE COMMANDS
 ─────────────────────────────────────────
-  wg done <task-id>           # Mark task complete
+  wg done <task-id>           # Mark task complete (loop fires if present)
+  wg done <task-id> --converged  # Complete and STOP the loop
   wg fail <task-id> --reason  # Mark failed (can be retried)
   wg abandon <task-id>        # Give up permanently
 
@@ -93,10 +94,13 @@ LOOP EDGES (cyclic processes)
   wg show <task-id>           # See loop_iteration to know which pass you're on
   wg loops                    # List all loop edges and their status
 
-  When your loop has converged (work is complete, no more iterations needed):
-  wg done <task-id> --converged
-  This signals early termination — the loop won't fire again. Without it, loops
-  run until max_iterations.
+  IMPORTANT — Signaling convergence:
+  When the loop's work is complete and no more iterations are needed:
+
+    wg done <task-id> --converged
+
+  This stops the loop. Using plain 'wg done' causes the loop to fire again.
+  Only use plain 'wg done' if you want the next iteration to proceed.
 
 TIPS
 ─────────────────────────────────────────
@@ -183,6 +187,7 @@ fn json_output() -> serde_json::Value {
             },
             "completion": {
                 "done": "Mark task complete",
+                "done_converged": "Complete task and stop loop (wg done <id> --converged)",
                 "fail": "Mark failed (can be retried)",
                 "abandon": "Give up permanently"
             }
@@ -192,7 +197,7 @@ fn json_output() -> serde_json::Value {
             "create": "wg add \"Revise\" --loops-to write --loop-max 3",
             "inspect": ["wg show <task-id>", "wg loops"],
             "note": "Agents read loop_iteration from wg show to know which pass they are on",
-            "convergence": "Use wg done <task-id> --converged to signal early termination when the loop's work is complete"
+            "convergence": "IMPORTANT: Use 'wg done <task-id> --converged' to stop a loop when work is complete. Plain 'wg done' causes the loop to fire again."
         },
         "tips": [
             "If the coordinator is running: add tasks with dependencies, it dispatches automatically",
@@ -346,6 +351,39 @@ mod tests {
         assert!(QUICKSTART_TEXT.contains("--coordinator-executor amplifier"));
         assert!(QUICKSTART_TEXT.contains("--model"));
         assert!(QUICKSTART_TEXT.contains("wg models"));
+    }
+
+    #[test]
+    fn test_quickstart_converged_prominent() {
+        // The LOOP EDGES section must contain IMPORTANT and --converged prominently
+        assert!(
+            QUICKSTART_TEXT.contains("IMPORTANT — Signaling convergence:"),
+            "Loop section should have IMPORTANT heading for convergence"
+        );
+        assert!(
+            QUICKSTART_TEXT.contains("wg done <task-id> --converged"),
+            "Loop section should show --converged command"
+        );
+        // The task state commands should also mention --converged
+        assert!(
+            QUICKSTART_TEXT.contains("wg done <task-id> --converged  # Complete and STOP the loop"),
+            "Task state commands should include --converged variant"
+        );
+    }
+
+    #[test]
+    fn test_quickstart_json_convergence_emphasis() {
+        let output = json_output();
+        let convergence = output["loops"]["convergence"].as_str().unwrap();
+        assert!(
+            convergence.contains("IMPORTANT"),
+            "JSON convergence note should be emphatic"
+        );
+        let done_converged = output["commands"]["completion"]["done_converged"].as_str().unwrap();
+        assert!(
+            done_converged.contains("--converged"),
+            "JSON should have done_converged command"
+        );
     }
 
     #[test]

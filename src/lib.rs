@@ -1,6 +1,7 @@
 pub mod agency;
 pub mod check;
 pub mod config;
+pub mod cycle;
 pub mod federation;
 pub mod graph;
 #[cfg(feature = "matrix")]

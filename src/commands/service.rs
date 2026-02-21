@@ -3058,6 +3058,9 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
             output["warning"] =
                 serde_json::json!("No agents defined — run 'wg agency init' or 'wg agent create'");
         }
+        if agency_agents_defined && alive_count == 0 && coord.ticks > 0 && coord.agents_spawned == 0 && coord.tasks_ready > 0 {
+            output["agents"]["note"] = serde_json::json!("tasks are ready but no agents have been spawned — check agent configuration");
+        }
         if !recent_errors.is_empty() || !recent_fatals.is_empty() {
             let mut all_errors: Vec<String> = recent_fatals;
             all_errors.extend(recent_errors);
@@ -3077,6 +3080,9 @@ pub fn run_status(dir: &Path, json: bool) -> Result<()> {
                 idle_count,
                 registry.agents.len()
             );
+            if alive_count == 0 && coord.ticks > 0 && coord.agents_spawned == 0 && coord.tasks_ready > 0 {
+                println!("  Note: tasks are ready but no agents have been spawned — check agent configuration");
+            }
         }
         let model_str = coord.model.as_deref().unwrap_or("default");
         let pause_str = if coord.paused { ", PAUSED" } else { "" };

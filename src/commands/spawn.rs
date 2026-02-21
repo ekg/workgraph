@@ -111,6 +111,20 @@ fn build_task_context(graph: &workgraph::WorkGraph, task: &workgraph::graph::Tas
         }
     }
 
+    // Inject loop metadata if this task has loops_to edges
+    if !task.loops_to.is_empty() {
+        context_parts.push(format!(
+            "Loop status: iteration {} of this task",
+            task.loop_iteration
+        ));
+        for edge in &task.loops_to {
+            context_parts.push(format!(
+                "  loops_to: '{}', max {}",
+                edge.target, edge.max_iterations
+            ));
+        }
+    }
+
     if context_parts.is_empty() {
         "No context from dependencies".to_string()
     } else {
@@ -900,5 +914,42 @@ mod tests {
 
         // Should redirect errors and log failures instead of silencing
         assert!(script.contains("2>> \"$OUTPUT_FILE\" || echo \"[wrapper] WARNING:"));
+    }
+
+    #[test]
+    fn test_build_task_context_includes_loop_metadata() {
+        use workgraph::graph::{LoopEdge, Node};
+
+        let mut graph = WorkGraph::new();
+        let mut task = make_task("review", "Review Task");
+        task.loops_to = vec![LoopEdge {
+            target: "write".to_string(),
+            guard: None,
+            max_iterations: 3,
+            delay: None,
+        }];
+        task.loop_iteration = 2;
+        graph.add_node(Node::Task(task.clone()));
+
+        let context = build_task_context(&graph, &task);
+        assert!(
+            context.contains("Loop status: iteration 2"),
+            "Context should include loop iteration, got: {}",
+            context
+        );
+        assert!(
+            context.contains("loops_to: 'write', max 3"),
+            "Context should include loop edge info, got: {}",
+            context
+        );
+    }
+
+    #[test]
+    fn test_build_task_context_no_loop_metadata_for_normal_tasks() {
+        let graph = WorkGraph::new();
+        let task = make_task("t1", "Normal Task");
+        let context = build_task_context(&graph, &task);
+        assert!(!context.contains("Loop status"));
+        assert!(!context.contains("loops_to"));
     }
 }

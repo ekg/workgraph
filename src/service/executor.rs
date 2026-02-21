@@ -23,6 +23,7 @@ pub struct TemplateVars {
     pub working_dir: String,
     pub skills_preamble: String,
     pub model: String,
+    pub task_loop_info: String,
 }
 
 impl TemplateVars {
@@ -46,6 +47,27 @@ impl TemplateVars {
 
         let skills_preamble = Self::resolve_skills_preamble(workgraph_dir);
 
+        let task_loop_info = if !task.loops_to.is_empty() {
+            let edges: Vec<String> = task.loops_to.iter().map(|edge| {
+                format!("  - loops to '{}' (max {})", edge.target, edge.max_iterations)
+            }).collect();
+            format!(
+                "## Loop Information\n\n\
+                 This task has loop edges (iteration {}):\n{}\n\n\
+                 **IMPORTANT: When this loop's work is complete (converged), you MUST use:**\n\
+                 ```\n\
+                 wg done {} --converged\n\
+                 ```\n\
+                 Using plain `wg done` will cause the loop to fire again and re-open tasks.\n\
+                 Only use plain `wg done` if you want the next iteration to proceed.",
+                task.loop_iteration,
+                edges.join("\n"),
+                task.id
+            )
+        } else {
+            String::new()
+        };
+
         Self {
             task_id: task.id.clone(),
             task_title: task.title.clone(),
@@ -55,6 +77,7 @@ impl TemplateVars {
             working_dir,
             skills_preamble,
             model: task.model.clone().unwrap_or_default(),
+            task_loop_info,
         }
     }
 
@@ -180,6 +203,7 @@ impl TemplateVars {
             .replace("{{working_dir}}", &self.working_dir)
             .replace("{{skills_preamble}}", &self.skills_preamble)
             .replace("{{model}}", &self.model)
+            .replace("{{task_loop_info}}", &self.task_loop_info)
     }
 }
 
@@ -350,6 +374,8 @@ You are an AI agent working on a task in a workgraph project.
 ## Context from Dependencies
 {{task_context}}
 
+{{task_loop_info}}
+
 ## Required Workflow
 
 You MUST use these commands to track your work:
@@ -368,6 +394,7 @@ You MUST use these commands to track your work:
 3. **Complete the task** when done:
    ```bash
    wg done {{task_id}}
+   wg done {{task_id}} --converged  # Use this if task has loop edges and work is complete
    ```
 
 4. **Mark as failed** if you cannot complete:
@@ -442,6 +469,8 @@ You are an AI agent working on a task in a workgraph project.
 ## Context from Dependencies
 {{task_context}}
 
+{{task_loop_info}}
+
 ## Required Workflow
 
 You MUST use these commands to track your work:
@@ -460,6 +489,7 @@ You MUST use these commands to track your work:
 3. **Complete the task** when done:
    ```bash
    wg done {{task_id}}
+   wg done {{task_id}} --converged  # Use this if task has loop edges and work is complete
    ```
 
 4. **Mark as failed** if you cannot complete:
@@ -1278,5 +1308,87 @@ args = ["--custom-flag"]
         assert!(vars.skills_preamble.contains("Actual content here."));
         // The frontmatter itself should not appear in the preamble body
         assert!(!vars.skills_preamble.contains("title: Skill"));
+    }
+
+    #[test]
+    fn test_template_vars_include_loop_info() {
+        use crate::graph::LoopEdge;
+        let mut task = make_test_task("task-1", "Looping Task");
+        task.loops_to = vec![LoopEdge {
+            target: "write".to_string(),
+            guard: None,
+            max_iterations: 3,
+            delay: None,
+        }];
+        task.loop_iteration = 2;
+
+        let vars = TemplateVars::from_task(&task, None, None);
+
+        assert!(vars.task_loop_info.contains("iteration 2"));
+        assert!(vars.task_loop_info.contains("loops to 'write'"));
+        assert!(vars.task_loop_info.contains("max 3"));
+        assert!(vars.task_loop_info.contains("wg done task-1 --converged"));
+        assert!(vars.task_loop_info.contains("IMPORTANT"));
+    }
+
+    #[test]
+    fn test_template_vars_empty_loop_info_for_non_loop_tasks() {
+        let task = make_test_task("task-1", "Normal Task");
+        let vars = TemplateVars::from_task(&task, None, None);
+        assert_eq!(vars.task_loop_info, "");
+    }
+
+    #[test]
+    fn test_default_prompt_contains_converged() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ExecutorRegistry::new(temp_dir.path());
+        let config = registry.load_config("claude").unwrap();
+        let template = config.executor.prompt_template.unwrap().template;
+        assert!(
+            template.contains("--converged"),
+            "Default claude prompt should mention --converged"
+        );
+        assert!(
+            template.contains("{{task_loop_info}}"),
+            "Default claude prompt should contain {{task_loop_info}} placeholder"
+        );
+    }
+
+    #[test]
+    fn test_default_amplifier_prompt_contains_converged() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ExecutorRegistry::new(temp_dir.path());
+        let config = registry.load_config("amplifier").unwrap();
+        let template = config.executor.prompt_template.unwrap().template;
+        assert!(
+            template.contains("--converged"),
+            "Default amplifier prompt should mention --converged"
+        );
+        assert!(
+            template.contains("{{task_loop_info}}"),
+            "Default amplifier prompt should contain {{task_loop_info}} placeholder"
+        );
+    }
+
+    #[test]
+    fn test_template_apply_loop_info_substitution() {
+        use crate::graph::LoopEdge;
+        let mut task = make_test_task("task-1", "Loop Task");
+        task.loops_to = vec![LoopEdge {
+            target: "review".to_string(),
+            guard: None,
+            max_iterations: 5,
+            delay: None,
+        }];
+        task.loop_iteration = 1;
+
+        let vars = TemplateVars::from_task(&task, None, None);
+        let template = "Before\n{{task_loop_info}}\nAfter";
+        let result = vars.apply(template);
+
+        assert!(result.contains("Before"));
+        assert!(result.contains("After"));
+        assert!(result.contains("--converged"));
+        assert!(!result.contains("{{task_loop_info}}"));
     }
 }
