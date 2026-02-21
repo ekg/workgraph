@@ -1004,6 +1004,7 @@ fn defer_self_mutation(op: &EvolverOperation, dir: &Path, run_id: &str) -> Resul
         loop_iteration: 0,
         ready_after: None,
         paused: false,
+        visibility: "internal".to_string(),
     };
 
     graph.add_node(Node::Task(task));
@@ -2969,6 +2970,7 @@ Let me know if you'd like me to adjust anything."#;
                 evaluator: "human".into(),
                 timestamp: "2025-01-01T00:00:00Z".into(),
                 model: None,
+                source: "llm".to_string(),
             },
             Evaluation {
                 id: "e2".into(),
@@ -2982,6 +2984,7 @@ Let me know if you'd like me to adjust anything."#;
                 evaluator: "human".into(),
                 timestamp: "2025-01-02T00:00:00Z".into(),
                 model: None,
+                source: "llm".to_string(),
             },
             Evaluation {
                 id: "e3".into(),
@@ -2995,6 +2998,7 @@ Let me know if you'd like me to adjust anything."#;
                 evaluator: "human".into(),
                 timestamp: "2025-01-03T00:00:00Z".into(),
                 model: None,
+                source: "llm".to_string(),
             },
         ];
 

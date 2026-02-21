@@ -420,6 +420,7 @@ mod tests {
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         }
     }
 

@@ -1,14 +1,16 @@
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
 use workgraph::agency::{
-    self, Evaluation, EvaluatorInput, load_motivation, load_role, record_evaluation,
-    render_evaluator_prompt,
+    self, Evaluation, EvaluatorInput, load_all_evaluations_or_warn, load_motivation, load_role,
+    record_evaluation, render_evaluator_prompt,
 };
 use workgraph::config::Config;
 use workgraph::graph::{LogEntry, Status};
 use workgraph::parser::load_graph;
+use workgraph::provenance;
 
 /// Extract the model from a task's spawn log entry.
 ///
@@ -240,6 +242,7 @@ pub fn run(
         evaluator: format!("claude:{}", model),
         timestamp,
         model: task_model.clone(),
+        source: "llm".to_string(),
     };
 
     // Step 8: Save evaluation and update performance records
@@ -315,6 +318,228 @@ pub fn run(
                 "Warning: no identity assigned — role/motivation performance records not updated"
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Record an evaluation from an external source.
+pub fn run_record(
+    dir: &Path,
+    task_id: &str,
+    score: f64,
+    source: &str,
+    notes: Option<&str>,
+    dimensions: &[String],
+    json: bool,
+) -> Result<()> {
+    // Validate score range
+    if !(0.0..=1.0).contains(&score) {
+        bail!("Score must be in [0.0, 1.0] range, got {}", score);
+    }
+
+    let path = super::graph_path(dir);
+    if !path.exists() {
+        bail!("Workgraph not initialized. Run `wg init` first.");
+    }
+
+    let graph = load_graph(&path)?;
+    let task = graph.get_task_or_err(task_id)?;
+
+    // Resolve agent info if available
+    let agency_dir = dir.join("agency");
+    let agents_dir = agency_dir.join("agents");
+
+    let (agent_id, role_id, motivation_id) = if let Some(ref agent_hash) = task.agent {
+        match agency::find_agent_by_prefix(&agents_dir, agent_hash) {
+            Ok(agent) => (
+                agent.id.clone(),
+                agent.role_id.clone(),
+                agent.motivation_id.clone(),
+            ),
+            Err(_) => (String::new(), String::new(), String::new()),
+        }
+    } else {
+        (String::new(), String::new(), String::new())
+    };
+
+    // Parse dimensional scores
+    let mut dim_map = HashMap::new();
+    for dim in dimensions {
+        if let Some((key, val)) = dim.split_once('=') {
+            let v: f64 = val
+                .parse()
+                .with_context(|| format!("Invalid dimension score '{}' in '{}'", val, dim))?;
+            dim_map.insert(key.to_string(), v);
+        } else {
+            bail!(
+                "Invalid dimension format '{}'. Expected key=value (e.g. correctness=0.8)",
+                dim
+            );
+        }
+    }
+
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let eval_id = format!("eval-{}-{}", task_id, timestamp.replace(':', "-"));
+
+    let evaluation = Evaluation {
+        id: eval_id,
+        task_id: task_id.to_string(),
+        agent_id,
+        role_id: role_id.clone(),
+        motivation_id: motivation_id.clone(),
+        score,
+        dimensions: dim_map,
+        notes: notes.unwrap_or("").to_string(),
+        evaluator: source.to_string(),
+        timestamp,
+        model: None,
+        source: source.to_string(),
+    };
+
+    // Save evaluation
+    if !role_id.is_empty() && !motivation_id.is_empty() {
+        let eval_path =
+            record_evaluation(&evaluation, &agency_dir).context("Failed to record evaluation")?;
+
+        if json {
+            let out = serde_json::json!({
+                "task_id": task_id,
+                "evaluation_id": evaluation.id,
+                "score": evaluation.score,
+                "source": evaluation.source,
+                "dimensions": evaluation.dimensions,
+                "path": eval_path.display().to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("Recorded evaluation for task '{}'", task_id);
+            println!("  Score:  {:.2}", evaluation.score);
+            println!("  Source: {}", evaluation.source);
+            println!("  Saved:  {}", eval_path.display());
+        }
+    } else {
+        agency::init(&agency_dir)?;
+        let evals_dir = agency_dir.join("evaluations");
+        let eval_path = agency::save_evaluation(&evaluation, &evals_dir)
+            .context("Failed to save evaluation")?;
+
+        if json {
+            let out = serde_json::json!({
+                "task_id": task_id,
+                "evaluation_id": evaluation.id,
+                "score": evaluation.score,
+                "source": evaluation.source,
+                "dimensions": evaluation.dimensions,
+                "path": eval_path.display().to_string(),
+                "warning": "No agent identity — performance records not updated",
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("Recorded evaluation for task '{}'", task_id);
+            println!("  Score:  {:.2}", evaluation.score);
+            println!("  Source: {}", evaluation.source);
+            println!("  Saved:  {}", eval_path.display());
+            println!("  Note:   No agent identity — performance records not updated");
+        }
+    }
+
+    // Record provenance
+    let _ = provenance::record(
+        dir,
+        "evaluate_record",
+        Some(task_id),
+        Some("external"),
+        serde_json::json!({
+            "source": source,
+            "score": score,
+        }),
+        provenance::DEFAULT_ROTATION_THRESHOLD,
+    );
+
+    Ok(())
+}
+
+/// Show evaluation history with optional filters.
+pub fn run_show(
+    dir: &Path,
+    task_filter: Option<&str>,
+    agent_filter: Option<&str>,
+    source_filter: Option<&str>,
+    limit: Option<usize>,
+    json: bool,
+) -> Result<()> {
+    let evals_dir = dir.join("agency").join("evaluations");
+    let mut evals = load_all_evaluations_or_warn(&evals_dir);
+
+    // Apply filters
+    if let Some(task_prefix) = task_filter {
+        evals.retain(|e| e.task_id.starts_with(task_prefix));
+    }
+    if let Some(agent_prefix) = agent_filter {
+        evals.retain(|e| e.agent_id.starts_with(agent_prefix));
+    }
+    if let Some(source_pat) = source_filter {
+        if source_pat.contains('*') {
+            // Glob match: convert simple glob to prefix/suffix match
+            let parts: Vec<&str> = source_pat.split('*').collect();
+            evals.retain(|e| {
+                if parts.len() == 2 {
+                    e.source.starts_with(parts[0]) && e.source.ends_with(parts[1])
+                } else {
+                    e.source == source_pat
+                }
+            });
+        } else {
+            evals.retain(|e| e.source == source_pat);
+        }
+    }
+
+    // Sort by timestamp descending
+    evals.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    // Apply limit
+    if let Some(n) = limit {
+        evals.truncate(n);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&evals)?);
+    } else if evals.is_empty() {
+        println!("No evaluations found.");
+    } else {
+        // Table header
+        println!(
+            "{:<20} {:>5}  {:<16} {:<12} {}",
+            "Task", "Score", "Source", "Agent", "Timestamp"
+        );
+        println!("{}", "─".repeat(75));
+
+        for e in &evals {
+            let agent_display = if e.agent_id.is_empty() {
+                "-"
+            } else if e.agent_id.len() > 10 {
+                &e.agent_id[..10]
+            } else {
+                &e.agent_id
+            };
+            let task_display = if e.task_id.len() > 18 {
+                &e.task_id[..18]
+            } else {
+                &e.task_id
+            };
+            let source_display = if e.source.len() > 14 {
+                &e.source[..14]
+            } else {
+                &e.source
+            };
+            println!(
+                "{:<20} {:>5.2}  {:<16} {:<12} {}",
+                task_display, e.score, source_display, agent_display, e.timestamp
+            );
+        }
+
+        println!("\n{} evaluation(s)", evals.len());
     }
 
     Ok(())

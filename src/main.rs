@@ -119,6 +119,10 @@ enum Commands {
         /// Delay between loop iterations (e.g., 30s, 5m, 1h, 24h, 7d)
         #[arg(long = "loop-delay")]
         loop_delay: Option<String>,
+
+        /// Task visibility zone for trace exports (internal, public, peer)
+        #[arg(long, default_value = "internal")]
+        visibility: String,
     },
 
     /// Edit an existing task
@@ -185,6 +189,10 @@ enum Commands {
         /// Manually override the loop iteration counter on this task
         #[arg(long = "loop-iteration")]
         loop_iteration: Option<u32>,
+
+        /// Set task visibility zone (internal, public, peer)
+        #[arg(long)]
+        visibility: Option<String>,
     },
 
     /// Mark a task as done
@@ -688,18 +696,10 @@ enum Commands {
         model: Option<String>,
     },
 
-    /// Trigger evaluation of a completed task
+    /// Evaluate tasks: auto-evaluate, record external scores, view history
     Evaluate {
-        /// Task ID to evaluate
-        task: String,
-
-        /// Model to use for the evaluator (overrides config and task defaults)
-        #[arg(long)]
-        evaluator_model: Option<String>,
-
-        /// Show what would be evaluated without spawning the evaluator agent
-        #[arg(long)]
-        dry_run: bool,
+        #[command(subcommand)]
+        command: EvaluateCommands,
     },
 
     /// Trigger an evolution cycle on agency roles and motivations
@@ -945,11 +945,74 @@ enum Commands {
         message: Option<String>,
     },
 
+    /// Stream workgraph events as JSON lines
+    Watch {
+        /// Filter events by type (repeatable). Types: task_state, evaluation, agent, all.
+        #[arg(long = "event", default_value = "all")]
+        event_types: Vec<String>,
+        /// Filter events to a specific task ID (prefix match)
+        #[arg(long)]
+        task: Option<String>,
+        /// Include N most recent historical events before streaming (default: 0)
+        #[arg(long, default_value = "0")]
+        replay: usize,
+    },
+
     /// Matrix integration commands
     #[cfg(any(feature = "matrix", feature = "matrix-lite"))]
     Matrix {
         #[command(subcommand)]
         command: MatrixCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvaluateCommands {
+    /// Trigger LLM-based evaluation of a completed task
+    Run {
+        /// Task ID to evaluate
+        task: String,
+        /// Model to use for the evaluator
+        #[arg(long)]
+        evaluator_model: Option<String>,
+        /// Show what would be evaluated without spawning the evaluator
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Record an evaluation from an external source
+    Record {
+        /// Task ID
+        #[arg(long)]
+        task: String,
+        /// Overall score (0.0-1.0)
+        #[arg(long)]
+        score: f64,
+        /// Source identifier (e.g. "outcome:sharpe", "vx:peer-abc", "manual")
+        #[arg(long)]
+        source: String,
+        /// Optional notes
+        #[arg(long)]
+        notes: Option<String>,
+        /// Optional dimensional scores (repeatable, format: dimension=score)
+        #[arg(long = "dim", num_args = 1)]
+        dimensions: Vec<String>,
+    },
+
+    /// Show evaluation history
+    Show {
+        /// Filter by task ID (prefix match)
+        #[arg(long)]
+        task: Option<String>,
+        /// Filter by agent ID (prefix match)
+        #[arg(long)]
+        agent: Option<String>,
+        /// Filter by source (exact match or glob, e.g. "outcome:*")
+        #[arg(long)]
+        source: Option<String>,
+        /// Show only the N most recent evaluations
+        #[arg(long)]
+        limit: Option<usize>,
     },
 }
 
@@ -1071,6 +1134,32 @@ enum TraceCommands {
         /// Set model for all created tasks
         #[arg(long)]
         model: Option<String>,
+    },
+
+    /// Export trace data filtered by visibility zone
+    Export {
+        /// Root task ID (exports this task and all descendants)
+        #[arg(long)]
+        root: Option<String>,
+        /// Visibility zone filter: "internal" (everything), "public" (sanitized),
+        /// "peer" (richer for credentialed peers). Default: "internal".
+        #[arg(long, default_value = "internal")]
+        visibility: String,
+        /// Output file path (default: stdout)
+        #[arg(long, short = 'o')]
+        output: Option<String>,
+    },
+
+    /// Import a trace export file as read-only context
+    Import {
+        /// Path to the trace export JSON file
+        file: String,
+        /// Source tag for imported data (e.g. "peer:alice", "team:platform")
+        #[arg(long)]
+        source: Option<String>,
+        /// Show what would be imported without making changes
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -1904,6 +1993,7 @@ fn command_name(cmd: &Commands) -> &'static str {
         Commands::Agent { .. } => "agent",
         Commands::Spawn { .. } => "spawn",
         Commands::Evaluate { .. } => "evaluate",
+        Commands::Watch { .. } => "watch",
         Commands::Evolve { .. } => "evolve",
         Commands::Config { .. } => "config",
         Commands::DeadAgents { .. } => "dead-agents",
@@ -1963,6 +2053,7 @@ fn supports_json(cmd: &Commands) -> bool {
             | Commands::Trajectory { .. }
             | Commands::Agent { .. }
             | Commands::Evaluate { .. }
+            | Commands::Watch { .. }
             | Commands::Evolve { .. }
             | Commands::Config { .. }
             | Commands::DeadAgents { .. }
@@ -2079,6 +2170,7 @@ fn main() -> Result<()> {
             loop_max,
             loop_guard,
             loop_delay,
+            visibility,
         } => {
             if let Some(ref peer_ref) = repo {
                 commands::add::run_remote(
@@ -2115,6 +2207,7 @@ fn main() -> Result<()> {
                     loop_max,
                     loop_guard.as_deref(),
                     loop_delay.as_deref(),
+                    &visibility,
                 )
             }
         }
@@ -2135,6 +2228,7 @@ fn main() -> Result<()> {
             loop_delay,
             remove_loops_to,
             loop_iteration,
+            visibility,
         } => commands::edit::run(
             &workgraph_dir,
             &id,
@@ -2153,6 +2247,7 @@ fn main() -> Result<()> {
             loop_delay.as_deref(),
             remove_loops_to.as_deref(),
             loop_iteration,
+            visibility.as_deref(),
         ),
         Commands::Done { id, converged } => commands::done::run(&workgraph_dir, &id, converged),
         Commands::Fail { id, reason } => {
@@ -2306,6 +2401,28 @@ fn main() -> Result<()> {
                 dry_run,
                 &blocked_by,
                 model.as_deref(),
+                cli.json,
+            ),
+            TraceCommands::Export {
+                root,
+                visibility,
+                output,
+            } => commands::trace_export::run(
+                &workgraph_dir,
+                root.as_deref(),
+                &visibility,
+                output.as_deref(),
+                cli.json,
+            ),
+            TraceCommands::Import {
+                file,
+                source,
+                dry_run,
+            } => commands::trace_import::run(
+                &workgraph_dir,
+                &file,
+                source.as_deref(),
+                dry_run,
                 cli.json,
             ),
         },
@@ -2666,16 +2783,56 @@ fn main() -> Result<()> {
             model.as_deref(),
             cli.json,
         ),
-        Commands::Evaluate {
+        Commands::Evaluate { command } => match command {
+            EvaluateCommands::Run {
+                task,
+                evaluator_model,
+                dry_run,
+            } => commands::evaluate::run(
+                &workgraph_dir,
+                &task,
+                evaluator_model.as_deref(),
+                dry_run,
+                cli.json,
+            ),
+            EvaluateCommands::Record {
+                task,
+                score,
+                source,
+                notes,
+                dimensions,
+            } => commands::evaluate::run_record(
+                &workgraph_dir,
+                &task,
+                score,
+                &source,
+                notes.as_deref(),
+                &dimensions,
+                cli.json,
+            ),
+            EvaluateCommands::Show {
+                task,
+                agent,
+                source,
+                limit,
+            } => commands::evaluate::run_show(
+                &workgraph_dir,
+                task.as_deref(),
+                agent.as_deref(),
+                source.as_deref(),
+                limit,
+                cli.json,
+            ),
+        },
+        Commands::Watch {
+            event_types,
             task,
-            evaluator_model,
-            dry_run,
-        } => commands::evaluate::run(
+            replay,
+        } => commands::watch::run(
             &workgraph_dir,
-            &task,
-            evaluator_model.as_deref(),
-            dry_run,
-            cli.json,
+            &event_types,
+            task.as_deref(),
+            replay,
         ),
         Commands::Evolve {
             dry_run,

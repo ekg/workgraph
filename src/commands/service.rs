@@ -577,6 +577,7 @@ fn build_auto_assign_tasks(graph: &mut workgraph::graph::WorkGraph, config: &Con
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
 
         graph.add_node(Node::Task(assign_task));
@@ -706,6 +707,7 @@ fn build_auto_evaluate_tasks(
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
 
         graph.add_node(Node::Task(eval_task));
@@ -2804,6 +2806,7 @@ fn handle_add_task(
         loop_iteration: 0,
         ready_after: None,
         paused: false,
+            visibility: "internal".to_string(),
     };
 
     graph.add_node(Node::Task(task));
@@ -3752,6 +3755,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let prompt = build_triage_prompt(&task, "some log output");
         assert!(prompt.contains("test-task"));
@@ -3924,6 +3928,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "done".to_string(),
@@ -3969,6 +3974,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "done".to_string(),
@@ -4012,6 +4018,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "continue".to_string(),
@@ -4069,6 +4076,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "restart".to_string(),
@@ -4116,6 +4124,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "continue".to_string(),
@@ -4167,6 +4176,7 @@ poll_interval = 120
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
         let verdict = TriageVerdict {
             verdict: "restart".to_string(),

@@ -62,9 +62,19 @@ pub fn run(
     loop_max: Option<u32>,
     loop_guard: Option<&str>,
     loop_delay: Option<&str>,
+    visibility: &str,
 ) -> Result<()> {
     if title.trim().is_empty() {
         anyhow::bail!("Task title cannot be empty");
+    }
+
+    // Validate visibility
+    match visibility {
+        "internal" | "public" | "peer" => {}
+        _ => anyhow::bail!(
+            "Invalid visibility '{}'. Valid values: internal, public, peer",
+            visibility
+        ),
     }
 
     let path = graph_path(dir);
@@ -176,6 +186,7 @@ pub fn run(
         loop_iteration: 0,
         ready_after: None,
         paused: false,
+        visibility: visibility.to_string(),
     };
 
     // Add task to graph
@@ -381,6 +392,7 @@ fn add_task_directly(
         loop_iteration: 0,
         ready_after: None,
         paused: false,
+        visibility: "internal".to_string(),
     };
 
     graph.add_node(Node::Task(task));
@@ -750,6 +762,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
@@ -784,6 +797,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
@@ -818,6 +832,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         );
         assert!(result.is_err());
         assert!(
@@ -859,6 +874,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         );
         assert!(result.is_ok());
     }
@@ -897,6 +913,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         );
         assert!(result.is_ok());
 

@@ -74,6 +74,12 @@ struct TaskDetails {
     ready_after: Option<String>,
     #[serde(default, skip_serializing_if = "is_not_paused")]
     paused: bool,
+    #[serde(skip_serializing_if = "is_default_visibility")]
+    visibility: String,
+}
+
+fn is_default_visibility(val: &str) -> bool {
+    val == "internal"
 }
 
 fn is_not_paused(val: &bool) -> bool {
@@ -176,6 +182,7 @@ pub fn run(dir: &Path, id: &str, json: bool) -> Result<()> {
         loop_iteration: task.loop_iteration,
         ready_after: task.ready_after.clone(),
         paused: task.paused,
+        visibility: task.visibility.clone(),
     };
 
     if json {
@@ -194,6 +201,10 @@ fn print_human_readable(details: &TaskDetails) {
         println!("Status: {} (PAUSED)", details.status);
     } else {
         println!("Status: {}", details.status);
+    }
+
+    if details.visibility != "internal" {
+        println!("Visibility: {}", details.visibility);
     }
 
     if let Some(ref assigned) = details.assigned {
@@ -457,6 +468,7 @@ mod tests {
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
 
         let json = serde_json::to_string(&details).unwrap();

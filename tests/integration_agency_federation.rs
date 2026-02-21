@@ -81,6 +81,7 @@ fn make_evaluation(id: &str, task_id: &str, agent_id: &str, role_id: &str, motiv
         evaluator: "test".to_string(),
         timestamp: "2026-01-15T12:00:00Z".to_string(),
         model: None,
+            source: "llm".to_string(),
     }
 }
 

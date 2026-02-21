@@ -241,6 +241,7 @@ fn build_assign_subgraph(dir: &Path) {
             loop_iteration: 0,
             ready_after: None,
             paused: false,
+            visibility: "internal".to_string(),
         };
 
         mutable_graph.add_node(Node::Task(assign_task));

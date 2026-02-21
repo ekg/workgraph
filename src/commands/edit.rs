@@ -27,6 +27,7 @@ pub fn run(
     loop_delay: Option<&str>,
     remove_loops_to: Option<&str>,
     loop_iteration: Option<u32>,
+    visibility: Option<&str>,
 ) -> Result<()> {
     let path = graph_path(dir);
 
@@ -207,6 +208,23 @@ pub fn run(
             println!("Set loop_iteration: {}", iter);
             changed = true;
         }
+
+        // Update visibility
+        if let Some(vis) = visibility {
+            match vis {
+                "internal" | "public" | "peer" => {
+                    let old = task.visibility.clone();
+                    task.visibility = vis.to_string();
+                    field_changes.push(serde_json::json!({"field": "visibility", "old": old, "new": vis}));
+                    println!("Updated visibility: {}", vis);
+                    changed = true;
+                }
+                _ => anyhow::bail!(
+                    "Invalid visibility '{}'. Valid values: internal, public, peer",
+                    vis
+                ),
+            }
+        }
     } // task borrow released here
 
     // Maintain bidirectional consistency: update `blocks` on referenced tasks
@@ -283,6 +301,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         )?;
 
         Ok(())
@@ -314,6 +333,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         )?;
 
         crate::commands::add::run(
@@ -336,6 +356,7 @@ mod tests {
             None,
             None,
             None,
+            "internal",
         )?;
 
         Ok(())
@@ -358,6 +379,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -396,6 +418,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -422,6 +445,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -461,6 +485,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -487,6 +512,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -526,6 +552,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -558,6 +585,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -584,6 +612,7 @@ mod tests {
             None,
             &["skill2".to_string()],
             &[],
+            None,
             None,
             None,
             None,
@@ -623,6 +652,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -649,6 +679,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -683,6 +714,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -704,6 +736,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -743,6 +776,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_err());
         assert!(
@@ -771,6 +805,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,
@@ -815,6 +850,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -831,6 +867,7 @@ mod tests {
             None,
             &[],
             &[],
+            None,
             None,
             None,
             None,

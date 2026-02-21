@@ -227,6 +227,19 @@ pub struct Task {
     /// The task retains its status and loop state; `wg resume` clears this flag.
     #[serde(default, skip_serializing_if = "is_bool_false")]
     pub paused: bool,
+    /// Visibility zone for trace exports. Controls what crosses organizational boundaries.
+    /// Values: "internal" (default, org-only), "public" (sanitized sharing),
+    /// "peer" (richer view for credentialed peers).
+    #[serde(default = "default_visibility", skip_serializing_if = "is_default_visibility")]
+    pub visibility: String,
+}
+
+fn default_visibility() -> String {
+    "internal".to_string()
+}
+
+fn is_default_visibility(val: &str) -> bool {
+    val == "internal"
 }
 
 /// Legacy identity format: `{"role_id": "...", "motivation_id": "..."}`.
@@ -298,6 +311,8 @@ struct TaskHelper {
     ready_after: Option<String>,
     #[serde(default)]
     paused: bool,
+    #[serde(default = "default_visibility")]
+    visibility: String,
     /// Old format: inline identity object. Migrated to `agent` hash on read.
     #[serde(default)]
     identity: Option<LegacyIdentity>,
@@ -351,6 +366,7 @@ impl<'de> Deserialize<'de> for Task {
             loop_iteration: helper.loop_iteration,
             ready_after: helper.ready_after,
             paused: helper.paused,
+            visibility: helper.visibility,
         })
     }
 }

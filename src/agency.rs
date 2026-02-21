@@ -202,21 +202,36 @@ fn is_default_executor(executor: &str) -> bool {
 /// An evaluation of agent performance on a specific task.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evaluation {
+    #[serde(default)]
     pub id: String,
     pub task_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
+    #[serde(default)]
     pub role_id: String,
+    #[serde(default)]
     pub motivation_id: String,
+    #[serde(alias = "value")]
     pub score: f64,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub dimensions: HashMap<String, f64>,
+    #[serde(alias = "reasoning")]
     pub notes: String,
+    #[serde(alias = "evaluated_by")]
     pub evaluator: String,
     pub timestamp: String,
     /// Model used by the agent for this task (e.g., "anthropic/claude-opus-4-6")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Source of this evaluation. Convention: "llm" (auto-evaluator), "manual",
+    /// "outcome:<metric>" (e.g. "outcome:sharpe"), "vx:<peer-id>".
+    /// Defaults to "llm" for backward compatibility with existing evaluation files.
+    #[serde(default = "default_eval_source")]
+    pub source: String,
+}
+
+fn default_eval_source() -> String {
+    "llm".to_string()
 }
 
 /// Expand `~` at the start of a path to the user's home directory.
@@ -1924,6 +1939,7 @@ mod tests {
             evaluator: "reviewer-bot".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
             model: None,
+            source: "llm".to_string(),
         }
     }
 
@@ -2660,6 +2676,7 @@ performance:
             evaluator: "test".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
             model: None,
+            source: "llm".to_string(),
         };
 
         let eval_path = record_evaluation(&eval, &agency_dir).unwrap();
@@ -2721,6 +2738,7 @@ performance:
             evaluator: "test".into(),
             timestamp: "2025-05-01T10:00:00Z".into(),
             model: None,
+            source: "llm".to_string(),
         };
 
         let eval2 = Evaluation {
@@ -2735,6 +2753,7 @@ performance:
             evaluator: "test".into(),
             timestamp: "2025-05-01T11:00:00Z".into(),
             model: None,
+            source: "llm".to_string(),
         };
 
         record_evaluation(&eval1, &agency_dir).unwrap();
@@ -2776,6 +2795,7 @@ performance:
             evaluator: "test".into(),
             timestamp: "2025-05-01T12:00:00Z".into(),
             model: None,
+            source: "llm".to_string(),
         };
 
         let result = record_evaluation(&eval, &agency_dir);

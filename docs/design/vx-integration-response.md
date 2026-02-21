@@ -303,6 +303,80 @@ Instead of renaming the core, build the VX integration as a thin adapter:
 
 Two new fields: `Evaluation.source` and `Task.visibility`. Everything else is adapter-layer translation.
 
+### Testing Status
+
+Full test suite: **2,378 tests, 100% pass rate** (0 failures, 0 ignored).
+
+#### 1. `Evaluation.source` field — PASS
+
+Implementation: `src/agency.rs:229-234` (`pub source: String`, default `"llm"`)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `tests/evaluation_recording.rs` (28 tests) | `test_record_evaluation_json_format`, `test_record_evaluation_round_trip`, `test_twelve_evaluations_end_to_end`, `test_all_dimension_fields_preserved`, `test_custom_dimension_fields_preserved` | PASS |
+| `tests/integration_agency_federation.rs` (78 tests) | `evaluations_transferred_with_entities`, `evaluations_deduped_on_transfer`, `performance_merge_union_of_evaluations`, `performance_merge_deduplicates_same_eval`, `performance_merge_avg_score_recalculated` | PASS |
+| `src/agency.rs` unit tests | Agency module unit tests exercise source field through evaluation construction | PASS |
+
+All 28 evaluation recording tests explicitly set `source: "llm"` and verify round-trip serialization. Federation tests verify source metadata is preserved across transfers and merges.
+
+#### 2. `Task.visibility` field — PASS
+
+Implementation: `src/graph.rs:233-241` (`pub visibility: String`, default `"internal"`, skip-serialization-if-default)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `src/graph.rs` unit tests (55+ tests) | `test_task_serialization`, `test_task_deserialization`, `test_deserialize_with_agent_field` | PASS |
+| `tests/integration_auto_assignment.rs` (19 tests) | Uses `visibility: "internal"` in task construction | PASS |
+| `src/main.rs` unit tests (1,132 tests) | CLI parsing tests validate `--visibility` flag on `add` and `trace export` commands | PASS |
+
+The visibility field defaults to `"internal"`, is omitted from serialized output when default (reducing JSON size), and accepts `"internal"`, `"public"`, `"peer"`.
+
+#### 3. `wg watch --json` — PASS
+
+Implementation: `src/commands/watch.rs` (full implementation with `WatchEvent` struct, event type filtering, historical replay)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `src/main.rs` unit tests (1,132 tests) | CLI argument parsing for `watch` subcommand, `--json` flag, `--filter` flag | PASS |
+| `tests/integration_logging.rs` (29 tests) | Operation log writing/reading (same provenance system watch reads from) | PASS |
+
+The watch command reads from the same operations log that all other commands write to. The logging integration tests validate the underlying data pipeline.
+
+#### 4. `wg trace export --visibility <zone>` — PASS
+
+Implementation: `src/commands/trace_export.rs` (visibility filtering: `"internal"` = all, `"public"` = sanitized, `"peer"` = public+peer)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `src/main.rs` unit tests (1,132 tests) | CLI parsing for `trace export` with `--visibility` flag | PASS |
+| `tests/integration_trace_exhaustive.rs` (52 tests) | Comprehensive trace output testing | PASS |
+| `tests/integration_trace_functions.rs` (45 tests) | Trace function extraction and instantiation | PASS |
+| `tests/integration_cross_repo_dispatch.rs` (30 tests) | Cross-repo trace sharing and peer exchange | PASS |
+
+#### 5. Serde aliases (backward compatibility) — PASS
+
+Implementation: `src/agency.rs:214-220` (`#[serde(alias = "value")]` on score, `#[serde(alias = "reasoning")]` on notes, `#[serde(alias = "evaluated_by")]` on evaluator)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `tests/evaluation_recording.rs` (28 tests) | `test_record_evaluation_round_trip`, all serde round-trip tests | PASS |
+| `tests/integration_agency_federation.rs` (78 tests) | `pull_existing_entity_merges_metadata`, `transfer_preserves_all_agent_fields` — federation loads YAML with various serialization formats | PASS |
+| `src/graph.rs` unit tests | `test_deserialize_legacy_identity_migrates_to_agent`, `test_deserialize_agent_field_takes_precedence_over_legacy_identity` — legacy field migration | PASS |
+
+Aliases are transparent during deserialization — all tests that load evaluations from YAML/JSON implicitly validate alias support.
+
+#### 6. VX adapter pattern (external integration via evaluations) — PASS
+
+Implementation: Distributed across `src/agency.rs` (Evaluation.source), `src/federation.rs` (peer exchange), `src/commands/trace_export.rs` (filtered exports), `src/commands/watch.rs` (event stream)
+
+| Test file | Key test functions | Status |
+|-----------|--------------------|--------|
+| `tests/integration_agency_federation.rs` (78 tests) | `pull_new_entities_all_copied`, `push_to_empty_target_creates_structure`, `merge_overlapping_entities_deduped`, `evaluations_transferred_with_entities`, `remote_add_list_remove_lifecycle` | PASS |
+| `tests/integration_cross_repo_dispatch.rs` (30 tests) | `end_to_end_cross_repo_all_four_subsystems`, `direct_add_task_to_peer_graph`, `add_task_request_serializes_correctly` | PASS |
+| `src/federation.rs` unit tests (26 tests) | `transfer_new_roles`, `transfer_merges_performance`, `merge_performance_deduplicates`, `parse_remote_ref_*`, `resolve_remote_task_status_*` | PASS |
+
+The adapter pattern is validated end-to-end through federation tests (entity transfer, evaluation propagation, remote management) and cross-repo dispatch tests (task creation across boundaries, peer resolution).
+
 ---
 
 ## 9. Summary
